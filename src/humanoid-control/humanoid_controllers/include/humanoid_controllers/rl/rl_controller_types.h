@@ -27,6 +27,8 @@ namespace humanoid_controller
     VMP_CONTROLLER,           ///< VMP控制器
     MORE_CONTROLLER,          ///< MoRE (Mixture-of-Residual-Experts) 行走控制器
     DANCE_CONTROLLER,         ///< Dance控制器
+    AMP_WILD_IMP_CONTROLLER,  ///< 无速度指令通道的阻抗柔顺控制器（amp_wild 模型 + 手臂阻抗，ignoreTwistCmd=true；必须追加在末尾保持枚举值稳定）
+    AMP_WAQ_CONTROLLER,       ///< WAQ 行走策略（追加保持已有枚举值）
   };
 
 
@@ -118,6 +120,16 @@ namespace humanoid_controller
     else if (type_str == "DANCE_CONTROLLER")
     {
       type = RLControllerType::DANCE_CONTROLLER;
+      return true;
+    }
+    else if (type_str == "AMP_WAQ_CONTROLLER")
+    {
+      type = RLControllerType::AMP_WAQ_CONTROLLER;
+      return true;
+    }
+    else if (type_str == "AMP_WILD_IMP_CONTROLLER")
+    {
+      type = RLControllerType::AMP_WILD_IMP_CONTROLLER;
       return true;
     }
     else

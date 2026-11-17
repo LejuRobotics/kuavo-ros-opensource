@@ -20,7 +20,10 @@ use_interploate_from_mpc     false       ; 从MPC切换到这个模型时是使�
 use_default_motor_csp_kpkd       false  ; ECmaster的电机是否使用默认的kpkd(kuavo.json),还是当前info中定义的，motor_pdo_kp、motor_pdo_kd
 use_amp_ruiwo_kpkd          true  ; 是否在 AMP 控制器中使用并切换 AMP 专用 Ruiwo 手臂增益(true/false)
 
-networkModelFile          /smp_7_8_slope_noise_bigger_w_smp.onnx      ;
+;networkModelFile          /smp_7_8_slope_noise_bigger_w_smp.onnx      ;
+networkModelFile           /2026-10-23_14-41-30_s55_depth_amp_stage2_from_fixed-cuda0_96050.onnx 
+
+
 commandData
 {
     inital

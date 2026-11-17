@@ -37,7 +37,8 @@
     <arg name="trace_path_automatic_test"  default="false"/>
 
     <!-- RL相关参数 -->
-    <arg name="rl_param"  default="$(find humanoid_controllers)/config/kuavo_v$(arg robot_version)/rl/skw_rl_param.info"/>
+    <arg name="rl_controllers_config" default="$(find humanoid_controllers)/config/kuavo_v$(arg robot_version)/rl_controllers.yaml"/>
+    <arg name="rl_param" default="" doc="Legacy fallback; set rl_controllers_config empty to use it"/>
     <arg name="network_model_file" default="$(find humanoid_controllers)/model/networks"/>
 
     <!-- Set with_coredump parameter based on coredump value -->
@@ -75,6 +76,7 @@
     <param name="build_cppad_state"   value="0"/>  <!-- build_cppad_state is set to 0(waiting), 1(building), 2(done) -->
     <param name="trace_path_automatic_test"  value="$(arg trace_path_automatic_test)"/>
     <param name="rl_param"             value="$(arg rl_param)"/>
+    <param name="rl_controllers_config" value="$(arg rl_controllers_config)"/>
     <param name="network_model_file"   value="$(arg network_model_file)"/>
 
     <!-- Launch script to collect kuavo-launch information -->

@@ -6,6 +6,8 @@
 #include "pinocchio/algorithm/compute-all-terms.hpp"
 #include "pinocchio/algorithm/crba.hpp"
 #include "pinocchio/algorithm/model.hpp"
+#include "pinocchio/algorithm/frames.hpp"
+#include "pinocchio/algorithm/jacobian.hpp"
 #include <functional>
 #include <iostream>  // 用于 std::cout
 
@@ -205,4 +207,118 @@ Eigen::VectorXd ArmTorqueController::computeTorque(
     arm_tau.segment(n_left_arm_, n_right_arm_) = tau.segment(right_arm_v_start_idx_, n_right_arm_);
     
     return arm_tau;
+}
+
+void ArmTorqueController::setGains(const Eigen::VectorXd& kp, const Eigen::VectorXd& kd)
+{
+    if (kp.rows() != n_arm_ || kd.rows() != n_arm_)
+    {
+        throw std::invalid_argument("setGains: KP/KD 矩阵维度与手臂关节数不匹配");
+    }
+    // 只覆盖手臂段的增益，腿部/腰部保持不变（保持零，不产生力矩）
+    kp_.segment(left_arm_q_start_idx_, n_left_arm_) = kp.segment(0, n_left_arm_);
+    kd_.segment(left_arm_v_start_idx_, n_left_arm_) = kd.segment(0, n_left_arm_);
+    kp_.segment(right_arm_q_start_idx_, n_right_arm_) = kp.segment(n_left_arm_, n_right_arm_);
+    kd_.segment(right_arm_v_start_idx_, n_right_arm_) = kd.segment(n_left_arm_, n_right_arm_);
+}
+
+Eigen::Isometry3d ArmTorqueController::getEndEffectorPose(bool left) const
+{
+    const std::string frame_name = left ? "zarm_l7_end_effector" : "zarm_r7_end_effector";
+    const pinocchio::FrameIndex frame_id = model_.getFrameId(frame_name);
+    // 前向运动学：基于最近一次 setMeasuredState 的实测状态
+    pinocchio::framesForwardKinematics(model_, data_, q_measured_);
+    // pinocchio::SE3 -> Eigen::Isometry3d（构造时强制单位旋转保证类型一致）
+    return Eigen::Isometry3d(data_.oMf[frame_id].toHomogeneousMatrix());
+}
+
+Eigen::MatrixXd ArmTorqueController::getEndEffectorJacobian(bool left) const
+{
+    const std::string frame_name = left ? "zarm_l7_end_effector" : "zarm_r7_end_effector";
+    const pinocchio::FrameIndex frame_id = model_.getFrameId(frame_name);
+
+    // 计算完整模型的关节雅可比（含基座，但基座固定，忽略其列）
+    pinocchio::computeJointJacobians(model_, data_, q_measured_);
+    pinocchio::updateFramePlacements(model_, data_);
+    // Position errors and estimated forces use world axes at the end effector.
+    Eigen::MatrixXd J_frame = Eigen::MatrixXd::Zero(6, model_.nv);
+    pinocchio::getFrameJacobian(model_, data_, frame_id, pinocchio::LOCAL_WORLD_ALIGNED, J_frame);
+
+    // 提取手臂关节对应的列：左臂 [left_arm_v_start_idx_, +n_left_arm_)，右臂 [right_arm_v_start_idx_, +n_right_arm_)
+    Eigen::MatrixXd J_arm = Eigen::MatrixXd::Zero(6, n_arm_);
+    J_arm.leftCols(n_left_arm_) = J_frame.middleCols(left_arm_v_start_idx_, n_left_arm_);
+    J_arm.rightCols(n_right_arm_) = J_frame.middleCols(right_arm_v_start_idx_, n_right_arm_);
+    return J_arm;
+}
+
+Eigen::VectorXd ArmTorqueController::computeGravityArm()
+{
+    // 计算重力项（需要完整的模型状态）
+    pinocchio::computeAllTerms(model_, data_, q_measured_, v_measured_);
+    const Eigen::VectorXd& G = data_.g;
+    // 提取手臂段的重力项
+    Eigen::VectorXd G_arm = Eigen::VectorXd::Zero(n_arm_);
+    G_arm.segment(0, n_left_arm_) = G.segment(left_arm_v_start_idx_, n_left_arm_);
+    G_arm.segment(n_left_arm_, n_right_arm_) = G.segment(right_arm_v_start_idx_, n_right_arm_);
+    return G_arm;
+}
+
+Eigen::VectorXd ArmTorqueController::computeCartesianImpedanceTorque(const Eigen::Vector3d& x_desired,
+                                                                     const Eigen::Vector3d& v_desired,
+                                                                     bool left,
+                                                                     double kx,
+                                                                     double dx)
+{
+    // 末端位姿与雅可比均使用世界系轴向。
+    const Eigen::Isometry3d x_cur = getEndEffectorPose(left);
+    const Eigen::MatrixXd J = getEndEffectorJacobian(left);  // 6 x n_arm_
+
+    // 平移误差（世界系）
+    const Eigen::Vector3d dx_pos = x_desired - x_cur.translation();
+    // 末端速度：J * 手臂关节速度（v_measured_ 为完整状态，需提取手臂段）
+    Eigen::VectorXd arm_v(n_arm_);
+    arm_v.segment(0, n_left_arm_) = v_measured_.segment(left_arm_v_start_idx_, n_left_arm_);
+    arm_v.segment(n_left_arm_, n_right_arm_) = v_measured_.segment(right_arm_v_start_idx_, n_right_arm_);
+    const Eigen::Vector3d v_ee = J.topRows(3) * arm_v;
+
+    // 笛卡尔力：F = Kx·Δx + Dx·(v_d − v_ee)
+    const Eigen::Vector3d F = kx * dx_pos + dx * (v_desired - v_ee);
+
+    // τ_imp = Jᵀ·F
+    const Eigen::VectorXd tau_imp = J.topRows(3).transpose() * F;
+
+    // 加重力补偿，得到最终手臂力矩
+    const Eigen::VectorXd G_arm = computeGravityArm();
+    return tau_imp + G_arm;
+}
+
+Eigen::Vector3d ArmTorqueController::estimateEndEffectorForce(const Eigen::VectorXd& tau_measured_arm,
+                                                              bool left) const
+{
+    if (tau_measured_arm.size() != n_arm_)
+    {
+        return Eigen::Vector3d::Zero();
+    }
+    // 模型力矩：重力项（忽略科氏与惯性，低速站立近似）
+    pinocchio::computeAllTerms(model_, data_, q_measured_, v_measured_);
+    Eigen::VectorXd G_arm = Eigen::VectorXd::Zero(n_arm_);
+    G_arm.segment(0, n_left_arm_) = data_.g.segment(left_arm_v_start_idx_, n_left_arm_);
+    G_arm.segment(n_left_arm_, n_right_arm_) = data_.g.segment(right_arm_v_start_idx_, n_right_arm_);
+
+    // 外力矩 = 实测 − 模型
+    const Eigen::VectorXd tau_ext = tau_measured_arm - G_arm;
+
+    // 雅可比（平移部分，仅单臂列有效）
+    const Eigen::MatrixXd J = getEndEffectorJacobian(left);
+    const Eigen::MatrixXd Jt = J.topRows(3);  // 3 x n_arm_
+
+    // 最小二乘外力：F = (J·Jᵀ)⁻¹·J·τ_ext
+    const Eigen::Matrix3d JJt = Jt * Jt.transpose();
+    Eigen::Matrix3d JJt_inv;
+    if (JJt.determinant() < 1e-8)
+    {
+        return Eigen::Vector3d::Zero();
+    }
+    JJt_inv = JJt.inverse();
+    return JJt_inv * (Jt * tau_ext);
 }

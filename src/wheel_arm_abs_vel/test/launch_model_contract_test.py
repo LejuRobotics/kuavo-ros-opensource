@@ -34,12 +34,38 @@ class LaunchModelTest(unittest.TestCase):
 
     def test_shared_model_contract_matches_both_entries(self):
         import json
-        for version in (62, 63, 210062, 310062, 400062):
+        for version in (62, 63, 210062, 310062, 400062, 410062, 410063):
             real = self.load('load_kuavo_real_velocity_ik.launch', ['robot_version:=' + str(version)])
             quest = self.load('quest_velocity_ik.launch', ['robot_version:=' + str(version)])
             key = '/whole_body_velocity_ik/model_contract_json'
             self.assertEqual(json.loads(real.params[key].value), json.loads(quest.params[key].value))
             self.assertEqual(json.loads(real.params[key].value)['robot_version'], version)
+
+    def test_v4_quest_velocity_profile_and_model(self):
+        import json
+        for version in (410062, 410063):
+            with self.subTest(version=version):
+                cfg = self.load('quest_velocity_ik.launch', ['robot_version:=' + str(version)])
+                params = {key: value.value for key, value in cfg.params.items()}
+                self.assertEqual(params['/vr_cmd_vel/linear_scale_x'], 0.4)
+                self.assertEqual(params['/vr_cmd_vel/linear_scale_y'], 0.4)
+                self.assertEqual(params['/vr_cmd_vel/angular_scale_z'], 0.45)
+                self.assertEqual(params['/humanoid_quest_control_with_arm/robot_version'], version)
+                contract = json.loads(params['/whole_body_velocity_ik/model_contract_json'])
+                self.assertEqual(contract['robot_version'], version)
+                self.assertEqual(contract['velocity_ik_urdf'],
+                                 f'biped_s{version}/urdf/biped_s{version}.urdf')
+                config = json.loads(Path(contract['config_path']).read_text())
+                self.assertEqual(config['EndEffectorType'], ['heiman', 'heiman'])
+
+    def test_v4_real_startup_keeps_existing_restart_policy(self):
+        for version, restart in ((400062, True), (400063, False),
+                                 (410062, True), (410063, False)):
+            with self.subTest(version=version):
+                cfg = self.load('load_kuavo_real_velocity_ik.launch',
+                                ['robot_version:=' + str(version)])
+                self.assertEqual(any(n.name == 'restart_urobot_service' for n in cfg.nodes),
+                                 restart)
 
     def test_port_parameters_are_shared_and_explicit(self):
         for entry in ('quest_velocity_ik.launch', 'pico_velocity_ik.launch'):
@@ -114,7 +140,7 @@ class LaunchModelTest(unittest.TestCase):
         import json
         import shlex
         import subprocess
-        for version in (62, 63, 210062, 310062, 400062):
+        for version in (62, 63, 210062, 310062, 400062, 410062, 410063):
             config = PACKAGE.parent / "kuavo_assets" / "config" / ("kuavo_v%d" % version) / "kuavo.json"
             expected = json.loads(config.read_text())["EndEffectorType"][0]
             for entry in ("quest_velocity_ik.launch", "pico_velocity_ik.launch"):
@@ -202,7 +228,8 @@ class LaunchModelTest(unittest.TestCase):
                 self.load('load_kuavo_mujoco_velocity_ik.launch', [])
 
     def test_real_manager_version_overrides_missing_or_stale_environment(self):
-        for version in (62, 63, 210062, 310062, 400062):
+        import json
+        for version in (62, 63, 210062, 310062, 400062, 410062, 410063):
             for inherited in (None, "", "40", "invalid"):
                 for entry, extra in (
                     ("load_kuavo_real_velocity_ik.launch", []),
@@ -219,6 +246,14 @@ class LaunchModelTest(unittest.TestCase):
                         self.assertEqual(managers[0].args, "manager")
                         self.assertEqual(dict(managers[0].env_args)["ROBOT_VERSION"], str(version))
                         self.assertEqual(int(cfg.params["/robot_version"].value), version)
+                        params = {key: value.value for key, value in cfg.params.items()}
+                        self.assertTrue(params["/urdfFile"].endswith(
+                            "/biped_s{0}/urdf/biped_s{0}.urdf".format(version)))
+                        self.assertTrue(params["/taskFile"].endswith(
+                            "/kuavo_s{0}/task.info".format(version)))
+                        self.assertEqual(json.loads(params["/kuavo_configuration"]),
+                                         json.loads((PACKAGE.parent / "kuavo_assets/config" /
+                                                     ("kuavo_v%d" % version) / "kuavo.json").read_text()))
 
     def test_s62_and_s63_entries(self):
         for version in (62, 63, 210062, 310062, 400062):

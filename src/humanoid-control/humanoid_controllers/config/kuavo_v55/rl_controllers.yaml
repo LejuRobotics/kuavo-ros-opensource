@@ -4,18 +4,13 @@
 # type: 具体控制器类型，可选值：MPC, AMP_CONTROLLER, FALL_STAND_CONTROLLER, DANCE_CONTROLLER
 
 controllers:
-  - name: "amp_controller"
-    class: "BASE_CONTROLLER"  # 基础行走控制器
-    type: "AMP_CONTROLLER"    # 具体控制器类型
-    config_file: "rl/skw_rl_param.info" 
+  - name: "amp_assemble_controller"
+    class: "BASE_CONTROLLER"  # AMP 族在外层循环中只占一个位置
+    type: "AMP_CONTROLLER"
+    assembly: true
+    config_file: "amp/amp_family.yaml"
     enabled: true
 
-  - name: "amp_wild_controller"
-    class: "BASE_CONTROLLER"  # 基础行走控制器
-    type: "AMP_CONTROLLER"    # 具体控制器类型
-    config_file: "rl/skw_rl_param_wild.info" 
-    enabled: true    
-    
   - name: "vmp_controller"
     class: "BASE_CONTROLLER"  # VMP控制器
     type: "VMP_CONTROLLER"    # VMP控制器类型
@@ -25,7 +20,7 @@ controllers:
   - name: "amp_controller_2"
     class: "BASE_CONTROLLER"  # 基础行走控制器
     type: "AMP_CONTROLLER"    # 具体控制器类型
-    config_file: "rl/skw_rl_param.info"
+    config_file: "amp/skw_rl_param.info"
     enabled: *vmp_with_amp2  # 默认不启用，必须与 vmp_controller 同开同关，避免 VMP 切 MPC 不稳定
 
   - name: "dance_controller"

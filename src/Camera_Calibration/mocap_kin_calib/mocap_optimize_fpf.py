@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Interactive capture -> automatic CTB selection -> fit -> candidate validation."""
+"""Interactive capture -> pose quality selection -> fit -> candidate validation."""
 from __future__ import annotations
 
 import argparse
@@ -18,7 +18,7 @@ import tempfile
 import yaml
 
 import mocap_optimize_1010 as optimizer
-from mocap_stability import analyze_capture
+from mocap_stability import analyze_capture, check_capture_quality
 from robot_variants import default_config_name
 
 
@@ -147,7 +147,11 @@ def capture_stage(label, destination, config_path, cfg, expected, run_dir, *, fi
     check_capture(fresh, cfg, fit=fit, expected_indices=expected)
     if fit:
         stability = cfg.get("workflow", {}).get("shoulder_stability", {})
-        analyze_capture(fresh, **stability)
+        report = analyze_capture(fresh, **stability)
+        if report["quality"]["status"] == "error":
+            # Preserve the previous capture; the rejected fresh file and report
+            # remain in this run's directory for diagnosis.
+            check_capture_quality(fresh, cfg, run_dir / "stability.json")
     # Stage on the destination filesystem, so replacement also works with an
     # external --output-dir. Existing captures survive partial/failed recording.
     with tempfile.NamedTemporaryFile(dir=destination.parent, prefix=".capture_", delete=False) as tmp:
@@ -160,8 +164,8 @@ def capture_stage(label, destination, config_path, cfg, expected, run_dir, *, fi
 
 
 def main(argv=None):
-    parser = argparse.ArgumentParser(description="一键采集、自动选择 CTB 模式、拟合及验证（默认 ROBOT_VERSION=62）")
-    parser.add_argument("--config", type=Path, help="采集话题、CTB/ETK、验收阈值及自动模式门限配置")
+    parser = argparse.ArgumentParser(description="一键采集、数据质量筛选、拟合及验证（默认 ROBOT_VERSION=62，共享 CTB）")
+    parser.add_argument("--config", type=Path, help="采集话题、CTB/ETK、验收阈值及数据质量门限配置")
     parser.add_argument("--fit-capture", type=Path, default=SCRIPT_DIR / "capture_fit.json")
     parser.add_argument("--validation-capture", type=Path, default=SCRIPT_DIR / "capture_vali.json")
     parser.add_argument("--output-dir", type=Path, help="覆盖候选输出目录；默认使用 YAML output_dir")
@@ -202,23 +206,11 @@ def main(argv=None):
     write_yaml(validation_config, validation_cfg)
     capture_stage("拟合", fit_path, fit_config, fit_cfg, fit_expected, run_dir,
                   fit=True, mocap_source=mocap_source)
-    stability = analyze_capture(fit_path, **cfg.get("workflow", {}).get("shoulder_stability", {}))
-    qingtong = stability["mode"] == "qingtong"
-    limits = stability["thresholds"]
-    print(f"自动模式门限: 最大点对差 > {limits['max_translation_mm']:g} mm "
-          f"或 > {limits['max_rotation_deg']:g} deg")
-    for arm, metrics in stability["arms"].items():
-        print(f"torso—shoulder {arm}: 点对差均值 {metrics['mean_translation_mm']:.3f} mm / "
-              f"{metrics['mean_rotation_deg']:.3f} deg；最大 {metrics['max_translation_mm']:.3f} mm / "
-              f"{metrics['max_rotation_deg']:.3f} deg")
-    for stage_cfg in (fit_cfg, validation_cfg):
-        stage_cfg["kinematics"]["ctb"]["mode"] = "per_sample" if qingtong else "shared"
-        stage_cfg["kinematics"].setdefault("validation", {})["qingtong"] = qingtong
-    write_yaml(fit_config, fit_cfg)
-    write_yaml(validation_config, validation_cfg)
-    (run_dir / "stability.json").write_text(json.dumps(stability, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-    angle_bound = fit_cfg["kinematics"]["ctb"].get("rotation_bound_deg", 3.0)
-    print(f"自动选择: {'qingtong，逐点 CTB 相对 I ≤ ' + str(angle_bound) + '°' if qingtong else '共享 CTB 旋转'}；拟合和独立验证使用相同模式。")
+    check_capture_quality(fit_path, cfg, run_dir / "stability.json")
+    fit_mode = fit_cfg["kinematics"]["ctb"].get("mode", "shared")
+    validation_mode = ("per_sample" if validation_cfg["kinematics"]["validation"].get("qingtong", False)
+                       else "shared")
+    print(f"配置指定 CTB 模式: 拟合={fit_mode}，独立验证={validation_mode}。")
     capture_stage("验证", validation_path, validation_config, validation_cfg,
                   validation_expected, run_dir, fit=False, mocap_source=mocap_source)
     if fit_path.read_bytes() == validation_path.read_bytes():
@@ -232,7 +224,7 @@ def main(argv=None):
         raise RuntimeError(f"拟合未生成候选: {candidate}")
     ask("开始验证候选 URDF？[y/n，默认 n]: ", ("y", "yes"))
     # The one-click workflow always refits reference angles, leaving geometry
-    # frozen. qingtong in the same effective config selects bounded per-pose CTB.
+    # frozen. Only an explicit validation.qingtong setting enables per-pose CTB.
     run_command(["bash", str(SCRIPT_DIR / "mocap_optimize.sh"), str(validation_path),
                  "--config", str(validation_config), "--validate-urdf", str(candidate),
                  "--no-freeze-frame-angles"], run_dir / "validation.log")
@@ -240,7 +232,7 @@ def main(argv=None):
     if (hashlib.sha256(source.read_bytes()).hexdigest() != source_hash or
             offsets["source_urdf_sha256"] != source_hash):
         raise RuntimeError("拟合基准发生变化，结果已保留，停止运行模型替换")
-    print(f"拟合和验证数据验收均通过。候选: {candidate}\n日志及自动模式判定: {run_dir}")
+    print(f"拟合和验证数据验收均通过。候选: {candidate}\n日志及数据质量报告: {run_dir}")
     optimizer._confirm_apply_urdf(source, candidate, target)
     return 0
 

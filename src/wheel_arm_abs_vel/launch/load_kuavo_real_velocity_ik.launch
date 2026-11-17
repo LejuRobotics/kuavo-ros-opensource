@@ -60,6 +60,10 @@
     <arg name="robot_version" value="$(arg robot_version)" />
     <arg name="rviz" value="$(arg rviz)" />
   </include>
+  <!-- Re-apply explicit contract parameters after version manager and nested configs. -->
+  <param name="/robot_version" value="$(arg robot_version)" />
+  <param name="/urdfFile" value="$(find kuavo_assets)/models/biped_s$(arg robot_version)/urdf/biped_s$(arg robot_version).urdf" />
+  <param name="/taskFile" value="$(find humanoid_wheel_interface)/config/kuavo_s$(arg robot_version)/task.info" />
   <arg name="urdfFile" value="$(find kuavo_assets)/models/biped_s$(arg robot_version)/urdf/biped_s$(arg robot_version).urdf" />
   <arg name="taskFile" value="$(find humanoid_wheel_interface)/config/kuavo_s$(arg robot_version)/task.info" />
   <arg name="libFolder" value="/var/ocs2/kuavo_s$(arg robot_version)" />
@@ -214,7 +218,7 @@
       <arg name="led_for_state" value="$(arg led_for_state)" />
     </include>
   </group>
-  <group if="$(eval arg('robot_version') in [61, 62, 210062, 310062, 400062])">
+  <group if="$(eval int(arg('robot_version')) in (61, 62, 210062, 310062, 400062, 410062))">
     <node pkg="humanoid_controllers" type="restart_urobot_service.sh" name="restart_urobot_service" output="screen" required="false" />
   </group>
   <param name="/vr_ik/use_velocity_ik_reference" value="true" type="bool" />
@@ -250,7 +254,7 @@
   <param name="sg100_debug_state" value="false" />
   <param name="sg100_output_limit" value="$(arg sg100_output_limit)" />
   <node pkg="humanoid_controllers" type="collect_launch_info.sh" name="collect_launch_info" />
-  <node pkg="wheel_arm_abs_vel" type="physical_estop_bridge_node.py" name="physical_estop_bridge" output="screen" />
+  <node pkg="humanoid_controllers" type="physical_estop_bridge_node.py" name="physical_estop_bridge" output="screen" launch-prefix="$(find humanoid_controllers)/scripts/start_node.sh $(arg with_coredump)" />
   <include file="$(find wheel_arm_abs_vel)/launch/absolute_arm_trajectory.launch">
     <arg name="robot_version" value="$(arg robot_version)" />
   </include>
@@ -278,4 +282,13 @@
     <arg name="head_control_mode" value="track_hand" />
     <arg name="head_track_target" value="$(arg head_track_target)" />
   </include>
+  <!-- Final version-scoped assets must win over parameters from nested legacy launches. -->
+  <param name="/robot_version" value="$(arg robot_version)" type="int" />
+  <param name="/urdfFile" value="$(find kuavo_assets)/models/biped_s$(arg robot_version)/urdf/biped_s$(arg robot_version).urdf" />
+  <param name="/taskFile" value="$(find humanoid_wheel_interface)/config/kuavo_s$(arg robot_version)/task.info" />
+  <param name="/robot_description" textfile="$(find kuavo_assets)/models/biped_s$(arg robot_version)/urdf/biped_s$(arg robot_version).urdf" />
+  <param name="/kuavo_configuration" textfile="$(find kuavo_assets)/config/kuavo_v$(arg robot_version)/kuavo.json" />
+  <param name="/referenceFile" value="$(find humanoid_controllers)/config/kuavo_v$(arg robot_version)/command/reference.info" />
+  <param name="/gaitCommandFile" value="$(find humanoid_controllers)/config/kuavo_v$(arg robot_version)/command/gait.info" />
+  <param name="/dynamicQrFile" value="$(find humanoid_controllers)/config/kuavo_v$(arg robot_version)/mpc/dynamic_qr.info" />
 </launch>

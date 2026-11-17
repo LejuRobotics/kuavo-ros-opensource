@@ -3,7 +3,7 @@
 以下命令在 `kuavo-ros-control` 根目录执行。`ROBOT_VERSION` 选择配置及机型，
 操作模式由命令参数决定，不按 capture 文件名判断。
 
-支持 `53/56` 和 `62/63` 系完整内部版本号，例如 `200062`、`500063`；
+支持 `53/55/56` 和 `62/63` 系完整内部版本号，例如 `300062`、`200063`、`210062`；
 环境变量填 `500063`，不是显示名称 `63.5`。62/63 系共用 `calib_s63.yaml`，
 但采集反馈、拟合基准、原始备份和运行模型均按完整版本分别选择，不再将 62 路由到 63。
 对应的 `kuavo.json` 和主 URDF 必须已存在；缺失资产不会回退到基础版本。
@@ -107,7 +107,7 @@ bash src/Camera_Calibration/mocap_kin_calib/mocap_optimize.sh \
 
 这里保留原测试命令的 `--no-freeze-frame-angles`：验证时重新估计共享 CTB/ETK 旋转，
 URDF 几何和 CTB/ETK 平移不变。只有共享 CTB（schema 1）候选可去掉该参数，
-连同拟合时保存的 CTB/ETK 旋转一起固定验证。默认逐点 CTB（schema 2）候选没有可冻结的共享 CTB；
+连同拟合时保存的 CTB/ETK 旋转一起固定验证。手动选择逐点 CTB（schema 2）的候选没有可冻结的共享 CTB；
 若需受限逐点验证，设置 `kinematics.validation.qingtong: true`，其行为见下方模式表。
 版本 `62` 的候选在 `output_s62`，不能继续写死为 `output_s63`。
 对小版本，在每个相关终端把 `62` 换成相同完整编号（例如 `500063`）。
@@ -125,9 +125,19 @@ bash src/Camera_Calibration/mocap_kin_calib/mocap_optimize_fpf.sh
 
 脚本默认 `ROBOT_VERSION=62`；已设置的环境变量优先，例如
 `ROBOT_VERSION=500063 bash .../mocap_optimize_fpf.sh`。默认使用 `calib_s63.yaml`，
-S53/S56 使用 `calib_s56.yaml`，也可用 `--config PATH` 指定话题、CTB/ETK 和阈值配置。
+S53/S55/S56 使用 `calib_s56.yaml`，也可用 `--config PATH` 指定话题、CTB/ETK 和阈值配置。
 62/63 系及其完整内部版本号共用参数配置，但采集模型、拟合基准和替换目录都按实际 `ROBOT_VERSION` 选择：
 `62` 使用 `biped_s62/urdf/biped_s62.urdf`，`500063` 使用 `biped_s500063/urdf/biped_s500063.urdf`。
+
+例如以下命令均使用 `calib_s63.yaml` 中的三个 Ei 权重和数据质量阈值，
+分别读取自己的 `kuavo_v${ROBOT_VERSION}/kuavo.json` 和主 URDF，
+默认分别输出到 `output_s300062`、`output_s200063`、`output_s210062`：
+
+```bash
+ROBOT_VERSION=300062 bash src/Camera_Calibration/mocap_kin_calib/mocap_optimize_fpf.sh
+ROBOT_VERSION=200063 bash src/Camera_Calibration/mocap_kin_calib/mocap_optimize_fpf.sh
+ROBOT_VERSION=210062 bash src/Camera_Calibration/mocap_kin_calib/mocap_optimize_fpf.sh
+```
 
 流程依次询问：
 
@@ -137,50 +147,71 @@ S53/S56 使用 `calib_s56.yaml`，也可用 `--config PATH` 指定话题、CTB/E
    OptiTrack 保留 YAML 中的原话题。只修改本次运行配置，原 YAML 不变。
 2. **开始拟合采点？** `y` 执行 `mocap_kin_calib/record_joint_poses.py --fixture new`，
    自动使用 `teach_left_joint_fit.json` / `teach_right_joint_fit.json`，完整采集 30 点后保存 `capture_fit.json`。
-3. 自动检查 torso—shoulder 稳定性，显示指标并选定拟合及验证模式。
+3. 检查 torso—shoulder 数据质量：左右链各取一次原始位置均值；任一点距均值 >8 mm 退出，
+   >3 mm 则同步剔除该 pose，最多剔除 3 个，超过则退出。删点后不重算均值，打印原始编号及偏差。
 4. **开始验证采点？** `y` 自动切到 `teach_left_joint_validation.json` /
    `teach_right_joint_validation.json`，当前轨迹为 10 个采集点，保存 `capture_vali.json`。
-5. **开始拟合并导出候选？** `y` 执行 25 点拟合、5 点验收和 30 点最终拟合，
+5. **开始拟合并导出候选？** `y` 按质量筛选后的实际点数执行拟合、留出验收和最终拟合，
    更新输出目录中的 `urdf_final.urdf`、`kinematic_offsets.json`、`frame_transforms.json`。
-6. **开始验证候选 URDF？** `y` 使用独立验证文件、候选 URDF 和步骤 3 选定的同一模式。
+6. **开始验证候选 URDF？** `y` 使用独立验证文件和候选 URDF，默认重拟合共享 CTB/ETK 旋转。
 7. 两次验收通过后，才询问是否替换运行模型；只有输入 `yes` 才备份并安装。
 
-设备选择仅控制采集话题和来源标记，不直接决定 CTB 拟合模式；CTB 仍由步骤 3 的
-稳定性检查自动选择。采集器显式接收所选的 `--mocap-source qingtong/motive`。
+设备选择仅控制采集话题和来源标记，不决定 CTB 拟合模式；拟合及验证模式只读取
+YAML 配置，默认均使用共享 CTB。采集器显式接收所选的 `--mocap-source qingtong/motive`。
 
 两次采点提示也可输入 `r` 复用已有完整文件；`n`、回车、EOF 或中断会停止流程。
-新采集先写入本次运行目录，点数、索引和观测检查通过后才替换目标 capture，
-不完整采集不会被当成成功，也不会覆盖已有完整文件。
+新采集先写入本次运行目录，点数、索引、观测和质量检查通过后才替换目标 capture，
+不完整或质量不合格的采集不会覆盖已有完整文件；失败的新数据保留在运行目录。
 teach 路径只写入本次运行配置，原 YAML 不变。
 
-自动模式判定不需要 shoulder 的真实 URDF 变换。对每点、每只手计算
-`T_torso_shoulder = T_torso_hand @ inverse(T_shoulder_hand)`，再计算 30 点之间
-最大两两位置差和 SO(3) 旋转角差。任一手超过 **8 mm 或 1°** 时启用青瞳模式，
-否则使用原共享 CTB 模式。阈值在 YAML 中设置：
+稳定性诊断不需要 shoulder 的真实 URDF 变换。对每点、每只手计算
+`T_torso_shoulder = T_torso_hand @ inverse(T_shoulder_hand)`，左右测量链分别用
+原始完整 30 点的位置计算一次算术均值，再计算每点距该均值的三维欧氏距离。
+任一链上任一点 **超过 8 mm** 就报数据质量错误并退出，不通过删点规避这道门限。
+否则，将任一链上 **超过 3 mm** 的 pose 加入剔除集合；两条链取并集，
+同一 pose 同步剔除、数量只算一次。需要剔除超过 3 个则退出。
+**删点后不重算均值，不迭代筛选**；保留点的偏差仍相对原始 30 点均值。
+恰好 8 mm 不触发硬退出，但会剔除；恰好 3 mm 保留。
+最大两两位置差和 SO(3) 旋转角差只作诊断，不参与退出或剔除，也不切换 CTB 模式。
+两两差与距均值偏差含义不同：例如两点各距均值 3 mm、方向相反，两两差可达 6 mm。
+两个 YAML 均可配置：
 
 ```yaml
 workflow:
   shoulder_stability:
     max_translation_mm: 8.0
+    exclude_translation_mm: 3.0
+    max_excluded_poses: 3
     max_rotation_deg: 1.0
 ```
 
-这是经验模式选择门限，不代表绝对测量精度。位置指标针对记录时的参考原点；
-旋转指标不依赖平移偏移。四通道只用于这个稳定性辅助判断，不增加拟合残差，
-也不要求 shoulder 外参。缺失或无效观测会报错。
+位置指标针对记录时的参考原点，旋转指标不依赖平移偏移。这些质量门限不代表
+绝对测量精度。四通道用于质量检查，不增加拟合残差，也不要求 shoulder 外参。
+缺失或无效观测会报错。`stability.json` 使用 schema 3，明确标记
+`quality_metric: distance_from_original_mean`，保存两条链的原始均值、逐点有符号 XYZ 偏差、
+距均值距离、需要剔除和实际剔除的编号。日志区分超过 8 mm 与超限点数超过 3 个。
 
-| 自动模式 | 25/30 点拟合 | 5 点留出验收 | 独立候选验证 |
+原始 capture 不删点、不重编号。原始 25 FIT / 5 VALIDATION 分组中被选中的坏点均剔除，
+不把留出点补入拟合集；最终拟合也只用保留点。例如剔除 FIT 的 1 点和 VALIDATION 的 2 点，
+流程变为 24 FIT → 3 VALIDATION → 27 FINAL。日志显示实际编号和点数，两个 JSON 及候选
+URDF 元数据保存 `data_selection`（采集文件哈希、剔除编号、实际分组、质量指标、原始均值和阈值）。
+一键入口在独立验证采集前检查，独立拟合入口在求解前执行同样规则。
+另外采集的独立验证文件仍使用全部验证 pose，不按拟合数据的编号剔除。
+
+下文的 25/5/30 表示筛选前的分组；若发生剔除，以日志和导出元数据中的实际点数为准。
+
+| 默认模式 | 25/30 点拟合 | 5 点留出验收 | 独立候选验证 |
 | --- | --- | --- | --- |
-| 稳定，共享 CTB | 一组 CTB 旋转 + 共享 ETK/Ei | 所有拟合参数冻结 | 几何冻结，重拟合共享 CTB/ETK |
-| 不稳定，qingtong | 逐点 CTB 相对 I 总角 ≤3° + 共享 ETK/Ei | ETK/Ei 冻结，仅拟合 5 点 CTB | 几何冻结，逐点 CTB ≤3°，重拟合共享 ETK |
+| 共享 CTB | 一组 CTB 旋转 + 共享 ETK/Ei | 所有拟合参数冻结 | 几何冻结，重拟合共享 CTB/ETK |
 
-一键脚本内部统一使用 `--validate-urdf ... --no-freeze-frame-angles`，根据同一份
-判定写入 `kinematics.validation.qingtong`；不对外提供 freeze/no-freeze 开关。
-独立验证报告的是重拟合参考角度后的误差，青瞳模式尤其不能当作完全冻结参数的预测误差。
-共享 CTB 不施加逐点 3° 上限。青瞳上限仍由 `kinematics.ctb.rotation_bound_deg` 控制。
+一键脚本内部统一使用 `--validate-urdf ... --no-freeze-frame-angles`；不对外提供
+freeze/no-freeze 开关，也不改写 `kinematics.ctb.mode` 或 `kinematics.validation.qingtong`。
+独立验证报告的是重拟合参考角度后的误差，不是完全冻结参数的预测误差。
+共享 CTB 不施加逐点 3° 上限。手动逐点模式的配置见下文。
 
 默认输出 `output_s${ROBOT_VERSION}`（例如 `output_s62`、`output_s500063`），日志、阶段配置和 `stability.json` 保存在其
-`fpf_<时间戳>_*` 子目录。可自定义输入、输出路径以复用历史采集：
+`fpf_<时间戳>_*` 子目录。质量失败时也保存 `stability.json`，包含逐 pose 最大差及对应 pose、
+超限点对、退出原因或剔除结果。可自定义输入、输出路径以复用历史采集：
 
 ```bash
 bash src/Camera_Calibration/mocap_kin_calib/mocap_optimize_fpf.sh \
@@ -197,22 +228,22 @@ bash src/Camera_Calibration/mocap_kin_calib/mocap_optimize_fpf.sh \
 | `--output-urdf` | 拟合并额外生成候选 `urdf_final.urdf` | 成功后询问 `yes/no` |
 | `--validate-urdf PATH` | 固定指定模型的机械几何；由 `validation.qingtong` 选择参考角验证方式 | 否，不写输出 |
 
-独立拟合默认 `kinematics.ctb.mode: per_sample`。CTB 平移由 YAML 固定，
+独立拟合默认 `kinematics.ctb.mode: shared`，使用 93 参数共享 CTB 模型。
+5 点验收完全沿用 25 点拟合参数，不重拟合参考角度；通过后再进行 30 点最终拟合。
+
+仅显式设置 `kinematics.ctb.mode: per_sample` 时启用逐点模式。CTB 平移由 YAML 固定，
 每个采集点单独拟合 CTB 旋转，同一点左右手共用。
 只用 `kinematics.ctb.rotation_bound_deg` 控制角度上限，默认 `3.0`：
 每个 CTB 相对单位阵 `I` 的总旋转角不得超过 3°，不是三个轴各自允许 ±3°。
 逐点模式不包含共享 CTB 旋转，也不叠加 `initial_rotvec_deg`。
 左右 ETK 的平移继续固定，ETK 旋转和 14 个 Ei 跨点共享；不引入 shoulder
-外参、shoulder 残差或额外的正则项。N 点联合拟合共有 `90 + 3N` 个参数，
+外参或 shoulder 残差。Ei 正则权重与共享模式相同，见下文。N 点联合拟合共有 `90 + 3N` 个参数，
 25 点为 165 个，30 点为 180 个。
 
 25 点拟合后，ETK/Ei 固定为 25 点拟合结果，仅为 5 个留出点各自拟合 CTB，
 仍相对 `I` 受 3° 总旋转角上限约束。验收使用调整参考角度后的条件误差，
 不属于完全冻结参考角度的预测误差。验证通过才对全部 30 点联合拟合，
 逐点 CTB 仍受相同的角度上限约束。
-
-设为 `ctb.mode: shared` 则使用原来的 93 参数共享 CTB 模型，5 点验收完全沿用
-25 点拟合参数，不重拟合参考角度；通过后再进行 30 点最终拟合。
 
 逐点模式的 `frame_transforms.json` 使用 schema 2 保存 CTB 旋转、采集文件哈希及
 共享 ETK；仍支持读取旧 schema 1 的共享 CTB/ETK 元数据。
@@ -230,9 +261,36 @@ ROBOT_VERSION=63 bash src/Camera_Calibration/mocap_kin_calib/mocap_optimize.sh \
 
 `--force-output` 只允许覆盖输出目录里已有的候选 URDF，不代替最后的 `yes`。
 `--output-urdf --no-install` 仅导出候选、跳过安装询问；一键脚本用它把安装推迟到独立验证之后。
-25/30 点拟合必须收敛，5 点验证必须通过；最终每个 Ei 的平移向量范数必须
-不大于 15 mm，旋转向量范数必须不大于 10°。失败时不生成或覆盖最终输出，
+25/30 点拟合必须收敛，5 点验证必须通过；最终每个 Ei 的平移和旋转向量范数必须
+满足 `mocap_optimize_1010.py` 中的 `EI_OUTPUT_*` 上限。失败时不生成或覆盖最终输出，
 也不询问替换。JSON-only 成功时仍会覆盖输出目录中的两个 JSON。
+
+### Ei 偏置正则权重
+
+在 `config/calib_s56.yaml` 或 `config/calib_s63.yaml` 中修改：
+
+```yaml
+kinematics:
+  optimizer:
+    EI_POSITION_WEIGHT: 100.0
+    EI_THETA_WEIGHT: 0.0001
+    EI_OTHER_ROTATION_WEIGHT: 1.0
+```
+
+对每个关节，令 `t` 为 Ei 平移（mm），`r` 为 Ei 旋转向量（deg），`a` 为
+URDF 中该关节的单位局部轴，`theta = dot(r, a)`、`r_other = r - theta*a`。
+目标函数在观测残差平方和之外追加
+`w_position*||t||² + w_theta*theta² + w_other*||r_other||²`，整个最小二乘目标乘 `1/2`。
+实现中残差乘 `sqrt(weight)`；每个关节只追加一次，CTB/ETK 不加这三项正则。
+权重必须有限且非负，`0` 关闭对应项。增大位置权重抑制 xyz 偏置，减小 theta
+权重允许更大的轴向旋转；有非轴向旋转时，theta 不等同于独立电机零点。
+
+三个权重同时设为 `0` 可关闭这部分正则；旧 YAML 缺少这些键时同样按 `0` 处理。
+旧 `ei.translation_prior_mm` / `rotation_prior_deg` 仍兼容并叠加，默认均为 `0`。
+求解器数值缩放保持内部默认平移 `2 mm`、旋转 `1 deg`，旧的
+`translation_scale_mm` / `rotation_scale_deg` 配置仍可覆盖数值缩放。
+一键流程原样传递三个权重到阶段 YAML，拟合日志打印生效值。
+权重不改变 25/5/30 分组、验证误差计算、验收阈值和输出上限。
 
 候选导出后先检查替换清单。只有输入 `yes` 才执行替换；`no`、直接回车、
 输入结束或中断都会保留运行模型，候选结果仍保留在输出目录。

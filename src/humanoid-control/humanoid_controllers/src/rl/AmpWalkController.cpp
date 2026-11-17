@@ -11,19 +11,42 @@
 #include <cmath>
 #include <thread>
 
+// 手臂关节分类（每侧 7 个：l1..l7，按 arm_idx % 7 判断，依据 URDF 关节轴向）：
+//   0=肩 pitch（绕Y）1=肩 roll 2=肩 yaw  3=肘（forearm pitch，绕Y）
+//   4=腕 yaw  5=腕 pitch（绕Y）6=腕 roll
+// 与 armController.cpp 里的 isWristJoint / isElbowJoint 保持同一约定。
+static inline bool isArmShoulderPitchJoint(int arm_idx) { return (arm_idx % 7) == 0; }
+static inline bool isArmElbowJoint(int arm_idx) { return (arm_idx % 7) == 3; }
+static inline bool isArmWristPitchJoint(int arm_idx) { return (arm_idx % 7) == 5; }
+
 namespace humanoid_controller
 {
   using namespace ocs2;
   using namespace ocs2::humanoid;
 
   AmpWalkController::AmpWalkController(const std::string& name,
+                                       RLControllerType type,
                                        const std::string& config_file,
                                        ros::NodeHandle& nh,
                                        TopicLogger* ros_logger)
-    : RLControllerBase(name, RLControllerType::AMP_CONTROLLER, config_file, nh, ros_logger)
+    : RLControllerBase(name, type, config_file, nh, ros_logger)
   {
     is_amp_hand_controller_ = (name == "amp_hand_controller");
     // 构造函数里 RLControllerBase 已经调用 initializeServices() 和 initializeRLVariables()
+  }
+
+  AmpWalkController::AmpWalkController(const std::string& name,
+                                       const std::string& config_file,
+                                       ros::NodeHandle& nh,
+                                       TopicLogger* ros_logger)
+    : AmpWalkController(name, RLControllerType::AMP_CONTROLLER, config_file, nh, ros_logger)
+  {
+  }
+
+  void AmpWalkController::publishPolicyObservation(const std::string& field, const Eigen::VectorXd& value) {
+    if (!ros_logger_) return;
+    if (observation_owner_) ros_logger_->publishVector("/rl_controller/" + name_ + "/" + field, value);
+    if (!observation_owner_ || observation_owner_()) ros_logger_->publishVector("/rl_controller/" + field, value);
   }
 
   bool AmpWalkController::allowsWalkingDuringArmAction() const noexcept
@@ -64,6 +87,19 @@ namespace humanoid_controller
     gait_receiver_->setAmpHandController(name_ == "amp_hand_controller");
     if (is_amp_hand_controller_) {
       gait_receiver_->setAllowWalkingDuringAction(true);  // amp_hand 始终允许边走边做动作
+    }
+
+    // 注意：不再设置全局 /allow_walking_during_arm_action。
+    // 该 param 会被 humanoidController::shouldBlockWalkingCommandForExternalArmTarget() 读取，
+    // 若设为 true 会导致“VR 手臂偏离默认位时禁止切换到行走控制器”的保护被整体跳过。
+    // RlGaitReceiver 通过成员 flag allow_walking_during_action_ 独立生效，不受影响。
+
+    // 配置为纯站立控制器时：忽略所有 twist 指令（/cmd_vel）。
+    // 这样 /cmd_vel 与行走步态请求都无法把 cmdStance 切到 0（walking），
+    // 站立切换时源控制器腿保持静止，避免插值期间双腿迈步命令冲突（脚先乱动）。
+    if (ignore_twist_cmd_)
+    {
+      gait_receiver_->setIgnoreTwistCmd(true);
     }
 
     // 加载原地踏步速度配置
@@ -219,6 +255,16 @@ namespace humanoid_controller
     stand_angular_velocity_threshold_ = 0.1;
     loadData::loadPtreeValue(pt, use_stand_default_joint_state_, "use_stand_default_joint_state", false);
 
+    // 是否忽略所有 twist 指令与 scalar command（纯站立控制器模式）：
+    // 加载后 initialize() 中应用到 gait_receiver_，使本控制器不响应 /cmd_vel 与行走步态请求，
+    // 站立切换时源控制器腿保持静止，避免与目标起步命令冲突导致乱动。
+    ignore_twist_cmd_ = false;
+    loadData::loadPtreeValue(pt, ignore_twist_cmd_, "ignoreTwistCmd", false);
+    if (ignore_twist_cmd_)
+    {
+      ROS_INFO("[%s] ignoreTwistCmd = true: controller will ignore all twist & scalar commands", name_.c_str());
+    }
+
     if (use_stand_default_joint_state_ && pt.get_child_optional("standdefaultJointState"))
     {
       loadEigenMatrix("standdefaultJointState", standDefaultJointPosRL_);
@@ -258,6 +304,30 @@ namespace humanoid_controller
 
     loadData::loadCppDataType(rlParamFile, "actionScale", actionScale_);
     loadData::loadCppDataType(rlParamFile, "frameStack", frameStack_);
+    // 可选的 frameStack 覆盖开关（如 amp_wild 六帧输入）：
+    // frameStackOverrideEnabled=true 时用 frameStackOverride 覆盖 frameStack，
+    // 网络输入维度变为 numSingleObs*frameStackOverride（91*6=546）。
+    // 缺省（false）时保持 info 中 frameStack 原值（单帧 91 维），不影响其他 AMP 控制器。
+    loadData::loadPtreeValue(pt, frameStackOverrideEnabled_, "frameStackOverrideEnabled", false);
+    loadData::loadPtreeValue(pt, frameStackOverride_, "frameStackOverride", false);
+    // term-major 布局开关（H6 六帧模型专用），缺省 false 保持逐帧拼接
+    loadData::loadPtreeValue(pt, frameStackTermMajor_, "frameStackTermMajor", false);
+    // waao：热启动清历史开关（WAQ 多帧模型），缺省 false 保持原热启动行为
+    loadData::loadPtreeValue(pt, clearHistoryOnWarmResume_, "clearHistoryOnWarmResume", false);
+    if (frameStackOverrideEnabled_ && frameStackOverride_ > 0)
+    {
+      frameStack_ = frameStackOverride_;
+      ROS_INFO("[%s] frameStack override enabled: frameStack=%d", name_.c_str(), frameStack_);
+    }
+    if (frameStackTermMajor_)
+    {
+      ROS_INFO("[%s] frameStack term-major layout enabled (H6 multi-frame)", name_.c_str());
+    }
+    if (frameStack_ <= 0)
+    {
+      ROS_ERROR("[%s] frameStack must be positive", name_.c_str());
+      return false;
+    }
     loadData::loadCppDataType(rlParamFile, "numSingleObs", numSingleObs_);
     loadData::loadCppDataType(rlParamFile, "cycleTime", cycleTime_);
     loadData::loadCppDataType(rlParamFile, "cycleTime_short", cycleTime_short_);
@@ -472,6 +542,96 @@ namespace humanoid_controller
                arm_rl_takeover_blend_enabled_ ? "true" : "false",
                arm_rl_takeover_blend_duration_,
                arm_zero_action_in_standing_ ? "true" : "false");
+
+      // 加载关节空间阻抗控制参数（模式3，仅 amp_wild_imp_rl_param.info 配置了 armImpedance 段才启用）
+      if (pt.find("armImpedance") != pt.not_found())
+      {
+        loadData::loadPtreeValue(pt, arm_impedance_enabled_, "armImpedance.enabled", false);
+        loadData::loadPtreeValue(pt, arm_impedance_target_source_, "armImpedance.targetSource", false);
+        loadData::loadPtreeValue(pt, arm_impedance_max_joint_vel_, "armImpedance.maxJointVel", false);
+        loadData::loadPtreeValue(pt, arm_impedance_force_limit_, "armImpedance.forceLimit", false);
+        loadData::loadPtreeValue(pt, arm_impedance_use_cst_, "armImpedance.useCST", false);
+        // 手臂观测输入开关（默认 true）：false=阻抗模式下将手臂观测清零隔离（模型认为手臂恒在默认位）
+        loadData::loadPtreeValue(pt, arm_obs_input_enabled_, "armImpedance.obsInputEnabled", true);
+        // 喂给 onnx 的手臂 pitch 关节（肩 pitch / 腕 pitch）角度限幅（度，默认 0=关闭）：
+        // 人推动手臂时把 pitch 角度截断在 ±该值，避免超出训练分布；只截断角度，速度不动。
+        loadData::loadPtreeValue(pt, arm_obs_pitch_clip_deg_, "armImpedance.obsPitchClipDeg", false);
+        // 喂给 onnx 的肘关节角度限幅（度）：单独可调（<=0 时沿用 obsPitchClipDeg）。
+        loadData::loadPtreeValue(pt, arm_obs_elbow_clip_deg_, "armImpedance.obsElbowClipDeg", false);
+        // 锁死手腕开关（默认 true）：true=模式3阻抗不控制手腕，手腕三关节目标固定默认位并以 CSP+高增益锁定
+        loadData::loadPtreeValue(pt, arm_impedance_lock_wrist_, "armImpedance.lockWristJoints", true);
+        // 退出阻抗时手臂（joint_q + kp/kd）的过渡时长；<=0 关闭。
+        // 兼容旧键名 ecHandoverDuration（先读新键，读不到再读旧键）。
+        loadData::loadPtreeValue(pt, arm_impedance_handover_duration_, "armImpedance.handoverDuration", false);
+        if (arm_impedance_handover_duration_ <= 0.0)
+        {
+          loadData::loadPtreeValue(pt, arm_impedance_handover_duration_, "armImpedance.ecHandoverDuration", false);
+        }
+        // 阻抗模式切出的“手臂回位门禁”：关节偏差超过阈值（度）时禁止切换控制器；<=0 关闭
+        loadData::loadPtreeValue(pt, arm_impedance_switch_guard_deg_, "armImpedance.switchGuardDeg", false);
+        // 肘关节随肩部 pitch 负向随动（仅模式3，CSP 位置控制）：
+        //   肘目标 = 肘参考位 + k·min(0, 肩pitch位移)，肩 pitch 正向偏移不动。
+        loadData::loadPtreeValue(pt, arm_elbow_follow_enabled_, "armImpedance.elbowFollowEnabled", false);
+        loadData::loadPtreeValue(pt, arm_elbow_follow_ratio_, "armImpedance.elbowFollowRatio", false);
+        loadData::loadPtreeValue(pt, arm_elbow_follow_max_offset_deg_, "armImpedance.elbowFollowMaxOffsetDeg", false);
+
+        // 阻抗增益：arm-sized 向量（14 维，左臂在前右臂在后）。
+        // 注意：loadEigenMatrix 依赖目标矩阵预先 resize（按 rows()/cols() 读取元素），
+        // 空矩阵会直接抛异常导致整个控制器加载失败，必须先 resize 再加载。
+        if (pt.get_child_optional("armImpedance.kp"))
+        {
+          arm_impedance_kp_.resize(jointArmNum_);
+          loadEigenMatrix("armImpedance.kp", arm_impedance_kp_);
+        }
+        if (pt.get_child_optional("armImpedance.kd"))
+        {
+          arm_impedance_kd_.resize(jointArmNum_);
+          loadEigenMatrix("armImpedance.kd", arm_impedance_kd_);
+        }
+        // 校验维度：arm-sized（14），如果缺失则置空（由 ArmController 使用默认值）
+        if (arm_impedance_kp_.size() != jointArmNum_ || arm_impedance_kd_.size() != jointArmNum_)
+        {
+          ROS_WARN("[%s] armImpedance.kp/kd dimension mismatch (kp=%ld, kd=%ld, expected=%d), using ArmController defaults",
+                   name_.c_str(), arm_impedance_kp_.size(), arm_impedance_kd_.size(), jointArmNum_);
+          arm_impedance_kp_.resize(0);
+          arm_impedance_kd_.resize(0);
+        }
+
+        ROS_INFO("[%s] Arm impedance (mode 3) config: enabled=%s, target_source=%d, max_vel=%.2f, force_limit=%.2f, use_cst=%s, obs_input=%s, lock_wrist=%s",
+                 name_.c_str(),
+                 arm_impedance_enabled_ ? "true" : "false",
+                 arm_impedance_target_source_,
+                 arm_impedance_max_joint_vel_,
+                 arm_impedance_force_limit_,
+                 arm_impedance_use_cst_ ? "true" : "false",
+                 arm_obs_input_enabled_ ? "true" : "false",
+                 arm_impedance_lock_wrist_ ? "true" : "false");
+        if (arm_impedance_kp_.size() > 0)
+        {
+          ROS_INFO("[%s]   kp=[%.1f..%.1f], kd=[%.2f..%.2f]",
+                   name_.c_str(),
+                   arm_impedance_kp_.minCoeff(), arm_impedance_kp_.maxCoeff(),
+                   arm_impedance_kd_.minCoeff(), arm_impedance_kd_.maxCoeff());
+        }
+      }
+
+      // 加载笛卡尔空间阻抗控制参数（模式4，仅 amp_wild_imp_rl_param.info 配置了 armCartesianImpedance 段才启用）
+      if (pt.find("armCartesianImpedance") != pt.not_found())
+      {
+        loadData::loadPtreeValue(pt, arm_cartesian_impedance_enabled_, "armCartesianImpedance.enabled", false);
+        loadData::loadPtreeValue(pt, arm_cartesian_kx_, "armCartesianImpedance.kx", false);
+        loadData::loadPtreeValue(pt, arm_cartesian_dx_, "armCartesianImpedance.dx", false);
+        loadData::loadPtreeValue(pt, arm_cartesian_ee_frame_mode_, "armCartesianImpedance.eeFrame", false);
+        loadData::loadPtreeValue(pt, arm_cartesian_force_est_gain_, "armCartesianImpedance.forceEstGain", false);
+
+        ROS_INFO("[%s] Arm cartesian impedance (mode 4) config: enabled=%s, kx=%.1f N/m, dx=%.1f N·s/m, ee_frame=%d, force_est_gain=%.1f",
+                 name_.c_str(),
+                 arm_cartesian_impedance_enabled_ ? "true" : "false",
+                 arm_cartesian_kx_,
+                 arm_cartesian_dx_,
+                 arm_cartesian_ee_frame_mode_,
+                 arm_cartesian_force_est_gain_);
+      }
     }
 
     // 是否启用腰部控制覆盖功能（对应 skw_rl_param.info 中 use_external_waist_controller）
@@ -550,6 +710,9 @@ namespace humanoid_controller
     }
 
     numSingleObs_ = 0;
+    singleInputDataKeys_.clear();
+    singleInputDataID_.clear();
+    inputDeque_.clear();
     for (const auto &pair : pt)
     {
       if (pair.first == "singleInputData")
@@ -686,6 +849,7 @@ namespace humanoid_controller
   void AmpWalkController::pause()
   {
     RLControllerBase::pause();
+    last_pause_time_ = ros::Time::now();
     if (gait_receiver_)
     {
       gait_receiver_->setEnabled(false);
@@ -711,12 +875,23 @@ namespace humanoid_controller
   //waao：热启动策略
   void AmpWalkController::resumeWarm()
   {
-    RLControllerBase::resume();
     if (gait_receiver_)
     {
       gait_receiver_->setEnabled(true);
     }
     sensor_data_updated_ = false;
+    // RL->RL 插值会对刚被 pause 的 source 控制器立即 resumeWarm 继续推理，此时历史仍有效不能清；
+    // 只有暂停超过 kStaleHistoryPauseSec（历史已过期）时才清零
+    constexpr double kStaleHistoryPauseSec = 0.1;
+    const bool history_stale =
+        last_pause_time_.isZero() || (ros::Time::now() - last_pause_time_).toSec() > kStaleHistoryPauseSec;
+    if (clearHistoryOnWarmResume_ && history_stale)
+    {
+      // The inference thread owns the history buffers. Request their reset
+      // before resuming so warm activation cannot race deque updates.
+      clear_history_requested_.store(true, std::memory_order_release);
+    }
+    RLControllerBase::resume();
     ROS_INFO("[%s] Controller warm-resumed without reset", name_.c_str());
   }
 
@@ -831,11 +1006,25 @@ namespace humanoid_controller
     }
   }
 
+  void AmpWalkController::inheritGaitCommandState(const AmpWalkController& source)
+  {
+    if (gait_receiver_ && source.gait_receiver_)
+      gait_receiver_->inheritCommandState(*source.gait_receiver_);
+  }
+
   void AmpWalkController::setCommandBufferCallback(std::function<bool()> callback)
   {
     if (gait_receiver_)
     {
       gait_receiver_->setCommandBufferCallback(std::move(callback));
+    }
+  }
+
+  void AmpWalkController::setGaitExecutionGate(bool blocked, bool stance)
+  {
+    if (gait_receiver_)
+    {
+      gait_receiver_->setExecutionGate(blocked, stance);
     }
   }
 
@@ -1196,6 +1385,15 @@ namespace humanoid_controller
   void AmpWalkController::updateObservation(const Eigen::VectorXd& state_est,
                                             const SensorData& sensor_data)
   {
+    if (clear_history_requested_.exchange(false, std::memory_order_acq_rel))
+    {
+      networkInputDataRL_.setZero();
+      singleInputData_.setZero();
+      for (auto& frame : inputDeque_)
+      {
+        frame.setZero();
+      }
+    }
     // === 1. 从 gait receiver 获取 CommandDataRL 并更新 phase ===
     CommandDataRL cmd = gait_receiver_->getCurrentCommand();
 
@@ -1334,9 +1532,31 @@ namespace humanoid_controller
     prev_raw_cmd_vel_line_x_ = raw_cmd_x_before_kick;
     prev_raw_cmd_vel_angular_z_ = raw_cmd_angz_before_kick;
     
+    // ignore_twist_cmd_（纯站立控制器，如 amp_wild_imp_controller）：twist 全 6 维
+    // （linear x/y/z + angular x/y/z，含旋转）恒为 0。接收端出口已统一清零，这里再压一次，
+    // 防止 kickstart / yaw 补偿 / 限速等后处理重新写回 twist。
+    if (ignore_twist_cmd_)
+    {
+      velocity_commands.setZero();
+      cmd.cmdVelLineX_ = cmd.cmdVelLineY_ = cmd.cmdVelLineZ_ = 0.0;
+      cmd.cmdVelAngularX_ = cmd.cmdVelAngularY_ = cmd.cmdVelAngularZ_ = 0.0;
+      cmd.cmdStance_ = 1.0;
+    }
+
     Eigen::VectorXd tempCommand_ = cmd.getCommandRL();
+    if (ignore_twist_cmd_)
+    {
+      tempCommand_.segment(0, 3).setZero();  // 前 3 维（twist）强制为 0
+    }
     Eigen::VectorXd tempCommand_scalar_state = tempCommand_;
-    tempCommand_scalar_state[3] = 1.0 - tempCommand_scalar_state[3];  // 前3维不变，第4维做 1- 操作    
+    tempCommand_scalar_state[3] = 1.0 - tempCommand_scalar_state[3];  // 前3维不变，第4维做 1- 操作
+
+    // ignore_twist_cmd_ 的控制器（纯站立模式）同样强制 scalar_command 为 0，
+    // 避免把训练分布之外的输入（scalar_command=1）喂给模型。
+    if (ignore_twist_cmd_)
+    {
+      tempCommand_scalar_state[3] = 0.0;
+    }
 
     // === 2. 状态、IMU、关节等数据，与 humanoidController_rl.cpp 一致 ===
     const Eigen::Vector3d baseEuler(state_est(2), state_est(1), state_est(0));
@@ -1353,17 +1573,64 @@ namespace humanoid_controller
     const bool virtual_arm_obs_active = is_amp_hand_controller_ &&
                                         use_virtual_arm_obs_ &&
                                         external_arm_control_active;
-    if (virtual_arm_obs_active)
+    // 手臂观测输入开关（armImpedance.obsInputEnabled，默认 true）：
+    //   true  = 阻抗模式下手臂真实角度/速度照常喂给 onnx 模型；
+    //   false = 阻抗模式下将手臂观测隔离为默认位（偏移/速度清零），
+    //           模型认为手臂恒在默认位（训练分布假设）。
+    // 仅阻抗模式（3/4）且外部手臂控制器接管时生效；amp_hand 的虚拟手臂观测不受此开关影响。
+    const bool arm_obs_isolation_active =
+        !arm_obs_input_enabled_ &&
+        arm_impedance_enabled_ &&
+        arm_command_replacement_enabled_ && jointArmNum_ > 0 && arm_controller_ &&
+        (arm_controller_->getMode() == 3 || arm_controller_->getMode() == 4);
+    if (virtual_arm_obs_active || arm_obs_isolation_active)
     {
       const int arm_start_idx = jointNum_ + waistNum_;
       jointPos.segment(arm_start_idx, jointArmNum_).setZero();
       jointVel.segment(arm_start_idx, jointArmNum_).setZero();
     }
 
+    // 喂给 onnx 的手臂 pitch / 肘关节角度限幅（armImpedance.obsPitchClipDeg / obsElbowClipDeg，度）：
+    // 人 / 外部控制器可以把手臂带到训练分布之外的大角度（阻抗柔顺、VR 接管等），
+    // 这里把【观测】截断在 ±clip 内；只截断角度（jointPos），jointVel 保持真实值。
+    // 肘单独可调（obsElbowClipDeg<=0 时沿用 obsPitchClipDeg）；<=0 关闭，配置了的控制器全模式生效。
+    const double elbow_clip_deg =
+        (arm_obs_elbow_clip_deg_ > 0.0) ? arm_obs_elbow_clip_deg_ : arm_obs_pitch_clip_deg_;
+    if ((arm_obs_pitch_clip_deg_ > 0.0 || elbow_clip_deg > 0.0) && jointArmNum_ > 0)
+    {
+      const int arm_start_idx = jointNum_ + waistNum_;
+      for (int i = 0; i < jointArmNum_; ++i)
+      {
+        double clip_deg = 0.0;
+        if (isArmElbowJoint(i))
+        {
+          clip_deg = elbow_clip_deg;
+        }
+        else if (isArmShoulderPitchJoint(i) || isArmWristPitchJoint(i))
+        {
+          clip_deg = arm_obs_pitch_clip_deg_;
+        }
+        if (clip_deg <= 0.0)
+        {
+          continue;
+        }
+        const int idx = arm_start_idx + i;
+        const double clip_rad = clip_deg * M_PI / 180.0;
+        jointPos[idx] = std::max(-clip_rad, std::min(clip_rad, jointPos[idx]));
+      }
+    }
+
     Eigen::VectorXd jointTorque = sensor_data.jointCurrent_;
     Eigen::Vector3d bodyAngVel = sensor_data.angularVel_;
     const Eigen::Vector3d &bodyLineAcc = sensor_data.linearAccel_;
     const Eigen::Vector3d &bodyLineFreeAcc = sensor_data.freeLinearAccel_;
+
+    // 手臂力矩观测：隔离开关关闭时（obsInputEnabled=false）阻抗模式下手臂力矩清零隔离，
+    // 与位置/速度观测保持一致的"手臂在默认位"假设。
+    if (arm_obs_isolation_active)
+    {
+      jointTorque.segment(jointNum_ + waistNum_, jointArmNum_).setZero();
+    }
 
     // 归一化 torque
     for (int i = 0; i < jointNum_ + jointArmNum_ + waistNum_; ++i)
@@ -1558,7 +1825,18 @@ namespace humanoid_controller
 
     if(cmd.cmdStance_) commanState_ << 1.0;
     else commanState_ << 0.0;
-    
+
+    // scalar_commands（1 维标量命令 = 1 - cmdStance）：
+    // 训练端（H6）把命令拆成 velocity_commands(3) + scalar_commands(1) 两个独立 term，
+    // 相应配置（如 amp_wild_imp_rl_param.info）需按相同划分喂观测，否则
+    // singleInputDataMap 中查不到 key 会抛 std::out_of_range（map::at）。
+    Eigen::VectorXd scalar_commands(1);
+    scalar_commands[0] = 1.0 - static_cast<double>(cmd.cmdStance_);
+    // 纯站立控制器（ignore_twist_cmd_）：scalar command 恒为 0，与训练语义一致
+    if (ignore_twist_cmd_)
+    {
+      scalar_commands[0] = 0.0;
+    }
 
     // std::cout << "欧拉角：" << baseEuler << std::endl;
 
@@ -1568,6 +1846,7 @@ namespace humanoid_controller
         {"base_ang_vel", bodyAngVel},
         {"projected_gravity", projected_gravity},
         {"velocity_commands", velocity_commands},
+        {"scalar_commands", scalar_commands},
         {"command_state", command_state},
         {"joint_pos", jointPos},
         {"joint_vel", jointVel},
@@ -1593,6 +1872,17 @@ namespace humanoid_controller
         {"action", local_action}
     };
 
+    // Dual inference must not interleave two differently scaled model inputs on
+    // one curve. Keep per-member observations and a selected-member legacy view.
+    const bool publish_legacy_observation = !observation_owner_ || observation_owner_();
+    const auto publish_observation = [&](const std::string& suffix, const Eigen::VectorXd& value) {
+      if (!ros_logger_) return;
+      if (observation_owner_)
+        ros_logger_->publishVector("/rl_controller/" + name_ + suffix, value);
+      if (publish_legacy_observation)
+        ros_logger_->publishVector("/rl_controller" + suffix, value);
+    };
+
     // Fill singleInputData（与humanoidController一致）
     if (!singleInputDataKeys_.empty())
     {
@@ -1605,7 +1895,7 @@ namespace humanoid_controller
         index += value[1];
         if (ros_logger_)
         {
-          ros_logger_->publishVector("/rl_controller/InputData/" + key, singleInputDataMap.at(key).segment(value[0], value[1]) * value[2]);
+          publish_observation("/InputData/" + key, singleInputDataMap.at(key).segment(value[0], value[1]) * value[2]);
         }
       }
     }
@@ -1618,17 +1908,44 @@ namespace humanoid_controller
     // Clip and update inputDeque_（与humanoidController一致）
     inputDeque_.push_back(singleInputData_);
     inputDeque_.pop_front();
-    
+
     // Update networkInputData_（与humanoidController一致）
-    for (int i = 0; i < frameStack_; ++i)
+    if (frameStackTermMajor_ && frameStack_ > 1)
     {
-      networkInputDataRL_.segment(i * numSingleObs_, numSingleObs_) = inputDeque_[i];
+      // term-major 布局（H6 六帧模型专用）：
+      // 训练端（mjlab observation_manager flatten_history_dim=True）采用 term-major ordering：
+      //   [term0: f0..f5][term1: f0..f5]...[termN: f0..f5]
+      // 即每个观测 term 的 frameStack_ 帧连续排列；而 singleInputData_ 是按 term 顺序排列的
+      // 单帧数据（frame-major 内层），因此这里对每个 term 遍历所有历史帧，取出该 term 切片依次写入。
+      // 例如 91 维单帧按 (3,3,3,1,27,27,27) 拆分为 7 个 term 后：
+      //   [bav: 6*3][grav: 6*3][velcmd: 6*3][scalar: 6*1][jpos: 6*27][jvel: 6*27][act: 6*27] = 546
+      int outIdx = 0;
+      int termOffset = 0;  // 当前 term 在 singleInputData_ 中的起始偏移（按配置顺序累加 numIdx）
+      for (const auto &key : singleInputDataKeys_)
+      {
+        const int termDim = static_cast<int>(singleInputDataID_[key][1]);  // numIdx
+        for (int i = 0; i < frameStack_; ++i)
+        {
+          networkInputDataRL_.segment(outIdx, termDim) =
+              inputDeque_[i].segment(termOffset, termDim);
+          outIdx += termDim;
+        }
+        termOffset += termDim;
+      }
+    }
+    else
+    {
+      // frame-major 布局（默认，与 humanoidController 一致）：[frame0: 91][frame1: 91]...
+      for (int i = 0; i < frameStack_; ++i)
+      {
+        networkInputDataRL_.segment(i * numSingleObs_, numSingleObs_) = inputDeque_[i];
+      }
     }
     
     // 发布观测数据（如果ros_logger_可用）
     if (ros_logger_)
     {
-      ros_logger_->publishVector("/rl_controller/singleInputData", singleInputData_);
+      publish_observation("/singleInputData", singleInputData_);
     }
   }
 
@@ -1989,9 +2306,13 @@ namespace humanoid_controller
     auto joint_action_scale = [this](int i) {
       return (enable_elbow_scale_ && (i == 16 || i == 20)) ? 0.18 : actionScale_;
     };
+    Eigen::VectorXd joint_reference(jointNum_ + jointArmNum_ + waistNum_);
+    for (int i=0;i<joint_reference.size();++i)
+      joint_reference[i] = local_action[i] * joint_action_scale(i) * actionScaleTestRL_[i] + active_default[i];
+    processJointReference(joint_reference);
     for (int i = 0; i < jointNum_ + jointArmNum_ + waistNum_; i++)
     {
-      jointTor(i) = jointTor(i) + jointKpRL_(i) * (local_action[i] * joint_action_scale(i) * actionScaleTestRL_[i] - jointPos[i] + active_default[i]);
+      jointTor(i) = jointTor(i) + jointKpRL_(i) * (joint_reference[i] - jointPos[i]);
     }
     if (is_real_)
     {
@@ -2001,19 +2322,19 @@ namespace humanoid_controller
         {
           if (JointPDModeRL_(i) == 0)
           {
-            cmd[i] = jointKpRL_[i] * (local_action[i] * joint_action_scale(i) * actionScaleTestRL_[i] - jointPos[i] + active_default[i]) - jointKdRL_[i] * jointVel[i];
+            cmd[i] = jointKpRL_[i] * (joint_reference[i] - jointPos[i]) - jointKdRL_[i] * jointVel[i];
             cmd[i] = std::clamp(cmd[i], -torqueLimitsRL_[i], torqueLimitsRL_[i]);
             torque[i] = cmd[i];
           }
           else
           {
-            cmd[i] = (local_action[i] * joint_action_scale(i) * actionScaleTestRL_[i] + active_default[i]);
-            torque[i] = jointKpRL_[i] * (local_action[i] * joint_action_scale(i) * actionScaleTestRL_[i] - jointPos[i] + active_default[i]) - jointKdRL_[i] * jointVel[i];
+            cmd[i] = (joint_reference[i]);
+            torque[i] = jointKpRL_[i] * (joint_reference[i] - jointPos[i]) - jointKdRL_[i] * jointVel[i];
           }
         }
         else if (JointControlModeRL_(i) == 2)
         {
-          cmd[i] = jointKpRL_[i] * (local_action[i] * joint_action_scale(i) * actionScaleTestRL_[i] - jointPos[i] + active_default[i]);
+          cmd[i] = jointKpRL_[i] * (joint_reference[i] - jointPos[i]);
           // cmd[i] = local_action[i] + defalutJointPosRL_[i];
           // std::cout << "cmd[" << i << "] = " << cmd[i] << "jointKpRL_:" << jointKpRL_[i] << std::endl;
           // cmd[i] = defalutJointPosRL_[i];
@@ -2028,14 +2349,14 @@ namespace humanoid_controller
       {
         if (JointControlModeRL_(i) == 0)
         {
-          cmd[i] = jointKpRL_[i] * (local_action[i] * joint_action_scale(i) * actionScaleTestRL_[i] - jointPos[i] + active_default[i]) - jointKdRL_[i] * jointVel[i];
+          cmd[i] = jointKpRL_[i] * (joint_reference[i] - jointPos[i]) - jointKdRL_[i] * jointVel[i];
         }
         else if (JointControlModeRL_(i) == 2)
         {
           cmd[i] = jointTor[i];
         }
         cmd[i] = std::clamp(cmd[i], -torqueLimitsRL_[i], torqueLimitsRL_[i]);
-        torque[i] = jointKpRL_[i] * (local_action[i] * joint_action_scale(i) * actionScaleTestRL_[i] - jointPos[i] + active_default[i]) - jointKdRL_[i] * jointVel[i];
+        torque[i] = jointKpRL_[i] * (joint_reference[i] - jointPos[i]) - jointKdRL_[i] * jointVel[i];
       }
 
     }
@@ -2323,6 +2644,10 @@ namespace humanoid_controller
       moveVectorEntry(sensor_data.jointVel_, 12, 0);
       moveVectorEntry(sensor_data.jointAcc_, 12, 0);
       moveVectorEntry(sensor_data.jointCurrent_, 12, 0);
+      if (sensor_data.jointTorque_.size() > 12) {
+        moveVectorEntry(sensor_data.jointTorque_, 12, 0);
+        sensor_data.jointTorque_[0] = -sensor_data.jointTorque_[0];
+      }
       sensor_data.jointPos_[0] = -sensor_data.jointPos_[0];
       sensor_data.jointVel_[0] = -sensor_data.jointVel_[0];
       sensor_data.jointAcc_[0] = -sensor_data.jointAcc_[0];
@@ -2396,6 +2721,83 @@ namespace humanoid_controller
         // 加载配置参数（从成员变量中获取，这些参数在 loadConfig 中已加载）
         arm_controller_->loadSettings(arm_max_tracking_velocity_, arm_tracking_error_threshold_,
                                      arm_mode_interpolation_velocity_, default_arm_pos);
+
+        // 传递力矩限制（用于阻抗模式力矩钳位）
+        if (torqueLimitsRL_.size() >= jointNum_ + waistNum_ + jointArmNum_)
+        {
+          Eigen::VectorXd arm_torque_limits;
+          if (is_roban_)
+          {
+            arm_torque_limits = torqueLimitsRL_.segment(waistNum_ + jointNum_, jointArmNum_);
+          }
+          else
+          {
+            arm_torque_limits = torqueLimitsRL_.segment(jointNum_ + waistNum_, jointArmNum_);
+          }
+          arm_controller_->setTorqueLimits(arm_torque_limits);
+        }
+
+        // 配置关节空间阻抗（模式3）
+        if (arm_impedance_enabled_)
+        {
+          // 退出阻抗时的手臂过渡（joint_q 默认位置参考 + kp/kd）：
+          //   先保持阻抗时的电机模式，把 joint_q 过渡到新控制器当前下发的参考，
+          //   并把 kp/kd 过渡到切换后将使用的值（优先 motor_pdo_kp/kd），
+          //   过渡完成后才放开模式 → 避免“参考跳变 + 增益跳变 + 换律”同时发生导致冲击/异响。
+          if (arm_impedance_handover_duration_ > 0.0)
+          {
+            Eigen::VectorXd handover_kp, handover_kd;
+            if (getMotorPdoGains(handover_kp, handover_kd))
+            {
+              arm_controller_->setHandoverTargetGains(handover_kp, handover_kd);
+              ROS_INFO("[%s] Impedance handover target gains from motor_pdo (arm joints will use these after mode switch)",
+                       name_.c_str());
+            }
+            else
+            {
+              ROS_WARN("[%s] use_default_motor_csp_kpkd=true: handover target gains fall back to "
+                       "joint_cmd values (kuavo.json), alignment may be less exact", name_.c_str());
+            }
+            arm_controller_->configureImpedanceHandover(arm_impedance_handover_duration_);
+          }
+
+          // 阻抗模式切出前的“手臂回位门禁”：关节偏差超过阈值（默认 10°）时不允许切换控制器
+          arm_controller_->configureImpedanceSwitchGuard(arm_impedance_switch_guard_deg_);
+
+          arm_controller_->configureImpedance(
+              true,
+              arm_impedance_kp_.size() == jointArmNum_ ? arm_impedance_kp_ : Eigen::VectorXd(),
+              arm_impedance_kd_.size() == jointArmNum_ ? arm_impedance_kd_ : Eigen::VectorXd(),
+              arm_impedance_target_source_,
+              arm_impedance_max_joint_vel_,
+              arm_impedance_force_limit_,
+              arm_impedance_use_cst_,
+              arm_impedance_lock_wrist_);
+
+          // 肘随肩 pitch 负向随动（仅模式3，CSP 位置控制）
+          arm_controller_->configureElbowFollow(arm_elbow_follow_enabled_,
+                                                arm_elbow_follow_ratio_,
+                                                arm_elbow_follow_max_offset_deg_);
+        }
+        else
+        {
+          arm_controller_->configureImpedance(false, Eigen::VectorXd(), Eigen::VectorXd());
+        }
+
+        // 配置笛卡尔空间阻抗（模式4）
+        if (arm_cartesian_impedance_enabled_)
+        {
+          arm_controller_->configureCartesianImpedance(
+              true,
+              arm_cartesian_kx_,
+              arm_cartesian_dx_,
+              arm_cartesian_ee_frame_mode_,
+              arm_cartesian_force_est_gain_);
+        }
+        else
+        {
+          arm_controller_->configureCartesianImpedance(false);
+        }
         
         ROS_INFO("[%s] Arm controller initialized (arm_command_replacement_enabled=true, urdf_path=%s)", 
                  name_.c_str(), urdf_path.c_str());
@@ -2482,6 +2884,34 @@ namespace humanoid_controller
 
     // 调用 ArmController::update 进行统一的手臂控制
     // 注意：ArmController 内部会根据模式自动处理，模式1（RL控制）不会更新命令消息
+
+    // 传递实测关节力矩（Phase 2 笛卡尔阻抗外力估计输入）
+    // 力矩顺序与 full_joint_pos 一致（腿+腰+手）；非 roban 直接用原始数据，
+    // roban 需要重新排列为 腿+腰+手 后传入
+    if (arm_controller_ && sensor_data.jointTorque_.size() >= jointNum_ + waistNum_ + jointArmNum_)
+    {
+      if (is_roban_)
+      {
+        // roban：sensor_data 顺序 腰+腿+手 → 腿+腰+手
+        Eigen::VectorXd waist_t = sensor_data.jointTorque_.segment(0, waistNum_);
+        Eigen::VectorXd leg_t = sensor_data.jointTorque_.segment(waistNum_, jointNum_);
+        Eigen::VectorXd arm_t = sensor_data.jointTorque_.segment(waistNum_ + jointNum_, jointArmNum_);
+        Eigen::VectorXd full_torque(jointNum_ + waistNum_ + jointArmNum_);
+        full_torque << leg_t, waist_t, arm_t;
+        arm_controller_->setMeasuredJointTorque(full_torque);
+      }
+      else
+      {
+        arm_controller_->setMeasuredJointTorque(
+            sensor_data.jointTorque_.head(jointNum_ + waistNum_ + jointArmNum_));
+      }
+    }
+
+    else if (arm_controller_) {
+      // Invalidate a missing sample rather than reusing the last torque forever.
+      arm_controller_->setMeasuredJointTorque(Eigen::VectorXd());
+    }
+
     arm_controller_->update(
       time,
       dt,

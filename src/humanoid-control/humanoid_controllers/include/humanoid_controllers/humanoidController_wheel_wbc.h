@@ -384,6 +384,8 @@ namespace humanoidController_wheel_wbc
     // ========== 手臂轨迹控制 ==========
     bool use_arm_trajectory_control_{false};  // 是否使用轨迹控制
     int8_t quickMode_{0};  // 全身快速模式类型: 0-关闭, 1-下肢快, 2-上肢快, 3-上下肢快
+    bool daggerArmQuickModeActive_{false};
+    bool configureDaggerArmQuickMode(bool enable, std::string& message);
     bool use_vel_control_{true};  // 是否使用速度控制
     bool prev_use_vel_control_{true};  // 上一次的速度控制状态，用于检测模式切换
     ros::Time last_reset_cmd_vel_ruckig_time_;  // 上次重置cmdVel Ruckig规划器的时间

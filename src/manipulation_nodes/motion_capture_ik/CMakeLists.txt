@@ -109,6 +109,9 @@ catkin_package(
   DEPENDS drake Eigen3
 )
 
+catkin_install_python(PROGRAMS scripts/dagger_quest_input_adapter.py
+  DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION})
+
 # Resolve for the package path at compile time.
 configure_file (
   "${PROJECT_SOURCE_DIR}/include/${PROJECT_NAME}/package_path.h.in"

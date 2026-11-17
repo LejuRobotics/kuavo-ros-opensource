@@ -52,7 +52,6 @@ S53/S55/S56 共用 `biped56` 布局和关节索引，头部安装高度（`zhead
 
 三路相机流程另有 [`auto_camera_calib_and_apply_zero.py`](auto_camera_calib_and_apply_zero.py) 串联采集、优化和写零，支持 S52、S53、S55、S56、S62/63 及其小版本；**S45 与 S49 系列不支持**（基础型号 45/49 的模型没有可用的左右腕相机帧 `l/r_hand_tripod`、`l/r_hand_camera`；49 系列用的是 `l_camera_link`/`camera_l_base`/`camera_r_base`），包装脚本会直接报错并提示改用 `run_chessboard_calibration.sh --demo head`。不要通过改写 `ROBOT_VERSION` 假装成其他实机版本。
 
-
 ### 运动学标定的 210062 / 310062 资源
 
 仓库包含 `210062` 和 `310062` 各自的主 URDF 及 `kuavo.json`。运动学标定使用完整版本号选择模型、保存采集元数据并隔离优化输出。采集也支持通过 `--urdf` 和 `--kuavo-json` 指定文件；FPF 和默认优化流程使用完整版本对应的主 URDF 路径。

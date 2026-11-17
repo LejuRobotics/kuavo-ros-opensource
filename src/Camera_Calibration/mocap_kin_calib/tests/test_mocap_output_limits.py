@@ -32,7 +32,7 @@ def load_optimizer(stem):
     return module
 
 
-MODULES = [load_optimizer(stem) for stem in ("mocap_optimize_backup", "mocap_optimize_1010")]
+MODULES = [load_optimizer("mocap_optimize_1010")]
 
 
 class OutputLimitTests(unittest.TestCase):
@@ -50,28 +50,33 @@ class OutputLimitTests(unittest.TestCase):
     def joint_block(model, p, arm="left", index=3):
         return p[model.ei_slice[arm]].reshape(7, 6)[index]
 
+    @staticmethod
+    def boundary_block(module):
+        return np.r_[np.array([0.6, 0.8, 0.]) * module.EI_OUTPUT_TRANSLATION_LIMIT_MM,
+                     np.array([0.6, 0.8, 0.]) * module.EI_OUTPUT_ROTATION_LIMIT_DEG]
+
     def test_vector_norm_limits_reject_both_signs_and_identify_joint(self):
         for module, model in self.models.items():
             for arm, index in (("left", 0), ("right", 6)):
-                for vector, part, limit in (([12., 10., 0.], slice(0, 3), "15"),
-                                            ([8., 7., 0.], slice(3, 6), "10")):
+                for part, limit in ((slice(0, 3), module.EI_OUTPUT_TRANSLATION_LIMIT_MM),
+                                    (slice(3, 6), module.EI_OUTPUT_ROTATION_LIMIT_DEG)):
                     for sign in (-1, 1):
                         with self.subTest(module=module.__name__, arm=arm, part=part, sign=sign):
                             p = np.zeros(model.parameter_count)
-                            self.joint_block(model, p, arm, index)[part] = np.array(vector) * sign
+                            self.joint_block(model, p, arm, index)[part] = np.array([0.8, 0.8, 0.]) * limit * sign
                             original = p.copy()
                             with self.assertRaises(ValueError) as caught:
                                 module._check_ei_output_limits(model, p)
                             self.assertIn(model.chains[arm].joint_names[index], str(caught.exception))
-                            self.assertIn(limit, str(caught.exception))
+                            self.assertIn(f"limit {limit:g}", str(caught.exception))
                             np.testing.assert_array_equal(p, original)
 
     def test_exact_norm_boundaries_pass_without_modifying_parameters(self):
         for module, model in self.models.items():
             with self.subTest(module=module.__name__):
                 p = np.zeros(model.parameter_count)
-                self.joint_block(model, p)[:] = [9., 12., 0., 6., 8., 0.]
-                self.joint_block(model, p, "right", 6)[:] = [-9., -12., 0., -6., -8., 0.]
+                self.joint_block(model, p)[:] = self.boundary_block(module)
+                self.joint_block(model, p, "right", 6)[:] = -self.boundary_block(module)
                 original = p.copy()
                 module._check_ei_output_limits(model, p)
                 np.testing.assert_array_equal(p, original)
@@ -96,7 +101,8 @@ class OutputLimitTests(unittest.TestCase):
 
     def test_smallest_float_above_each_limit_fails_and_is_reported(self):
         for module, model in self.models.items():
-            for component, limit in ((0, 15.), (3, 10.)):
+            for component, limit in ((0, module.EI_OUTPUT_TRANSLATION_LIMIT_MM),
+                                     (3, module.EI_OUTPUT_ROTATION_LIMIT_DEG)):
                 with self.subTest(module=module.__name__, component=component):
                     p = np.zeros(model.parameter_count)
                     value = np.nextafter(limit, np.inf)
@@ -130,6 +136,7 @@ class OutputLimitTests(unittest.TestCase):
                 "xyz_mm": transform[:3, 3].tolist(),
                 "quaternion_xyzw": Rotation.from_matrix(transform[:3, :3]).as_quat().tolist(),
             }
+            observations[body + "_in_l_shoulder"] = copy.deepcopy(observations[body + "_in_torso"])
         capture = root / "capture.json"
         capture.write_text(json.dumps({
             "meta": {"robot_version": "63", "robot_layout": cfg["robot"]["robot_layout"],
@@ -150,10 +157,6 @@ class OutputLimitTests(unittest.TestCase):
         if output_urdf and module.__name__.endswith("1010"):
             args.append("--output-urdf")
         result = SimpleNamespace(success=True, message="mocked fit", nfev=1)
-        if module.__name__.endswith("1010"):
-            # Focused limit cases use the legacy 93-value layout. The current
-            # CLI allocates a separate CTB for each of the 30 capture samples.
-            p_final = np.concatenate((np.tile(p_final[:3], 30), p_final[3:]))
         fits = [(np.zeros_like(p_final), result), (p_final, result)]
         with patch.dict(os.environ, ROBOT_VERSION="63"), patch.object(sys, "argv", args), \
                 patch.object(module, "fit", side_effect=fits) as fit, \
@@ -197,15 +200,16 @@ class OutputLimitTests(unittest.TestCase):
                 with self.subTest(module=module.__name__, urdf=output_urdf), tempfile.TemporaryDirectory() as temp:
                     config, capture, output = self.make_inputs(Path(temp), module)
                     p = np.zeros(model.parameter_count)
-                    self.joint_block(model, p)[:] = [9., 12., 0., 6., 8., 0.]
+                    block = self.boundary_block(module)
+                    self.joint_block(model, p)[:] = block
                     self.run_fit_main(module, config, capture, p, output_urdf)
                     expected = set(OUTPUT_NAMES if output_urdf else OUTPUT_NAMES[:2])
                     self.assertEqual({file.name for file in output.iterdir()}, expected)
                     offsets = json.loads((output / "kinematic_offsets.json").read_text())
                     self.assertEqual(len(offsets["joints"]), 14)
                     ei = offsets["joints"]["zarm_l4_joint"]["Ei"]
-                    self.assertEqual(ei["translation_mm"], [9., 12., 0.])
-                    self.assertEqual(ei["rotvec_deg"], [6., 8., 0.])
+                    self.assertEqual(ei["translation_mm"], block[:3].tolist())
+                    self.assertEqual(ei["rotvec_deg"], block[3:].tolist())
                     if output_urdf:
                         for arm in module.ARMS:
                             checked = module.load_chain(output / "urdf_final.urdf", arm,

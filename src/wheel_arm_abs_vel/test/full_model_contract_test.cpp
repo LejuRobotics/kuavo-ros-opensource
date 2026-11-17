@@ -8,10 +8,10 @@ int main(int argc, char** argv) {
     const std::string assets = argv[1];
     using wheel_arm_abs_vel::fullModelRelativePath;
     using wheel_arm_abs_vel::requireFullModel;
-    for (int version : {60, 61, 62, 63, 200062, 300062, 400062, 400063}) {
+    for (int version : {60, 61, 62, 63, 200062, 210062, 300062, 310062, 400062, 400063}) {
       const std::string full = assets + "/models/" + fullModelRelativePath(version);
       requireFullModel(version, assets, full);
-      for (int other : {60, 61, 62, 63, 200062, 300062, 400062, 400063}) {
+      for (int other : {60, 61, 62, 63, 200062, 210062, 300062, 310062, 400062, 400063}) {
         if (version == other) continue;
         bool rejected = false;
         try { requireFullModel(version, assets, assets + "/models/" + fullModelRelativePath(other)); }
@@ -36,7 +36,7 @@ int main(int argc, char** argv) {
       catch (const std::exception&) { rejected = true; }
       if (!rejected) throw std::runtime_error("unsupported version accepted");
     }
-    std::cout << "PASS: eight full models; cross-version, legacy, missing and unsupported models rejected\n";
+    std::cout << "PASS: validated full models; cross-version, legacy, missing and unsupported models rejected\n";
   } catch (const std::exception& e) {
     std::cerr << e.what() << '\n';
     return 1;

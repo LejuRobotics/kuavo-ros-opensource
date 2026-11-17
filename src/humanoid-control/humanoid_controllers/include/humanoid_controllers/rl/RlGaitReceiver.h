@@ -21,6 +21,7 @@ at www.bridgedp.com.
 #include <functional>
 #include <Eigen/Dense>
 #include "humanoid_controllers/rl/StanceDwellGate.h"
+#include <memory>
 
 namespace ocs2
 {
@@ -98,6 +99,19 @@ struct CommandDataRL
   }
 };
 
+// Optional command shaping owned by the controller; absent filters preserve legacy behavior.
+// Called under the receiver lock. Implementations must not call back into a receiver.
+class GaitCommandFilter
+{
+public:
+  virtual ~GaitCommandFilter() = default;
+  virtual void reset() = 0;
+  virtual geometry_msgs::Twist update(const geometry_msgs::Twist&, double time, bool bypass) = 0;
+  virtual CommandDataRL filterOutput(const CommandDataRL&) const = 0;
+  virtual void inherit(const GaitCommandFilter* source) = 0;
+  virtual double inheritedForwardVelocity(double fallback) const = 0;
+};
+
 class RlGaitReceiver
 {
 public:
@@ -113,6 +127,9 @@ public:
   /// 强制重置到 stance 模式（cmdStance_=1, 速度清零），用于控制器 resume 时避免残留行走指令
   void resetToStance();
   /// 允许在 robot_action 期间继续接收行走指令（用于走不停腿场景）
+  /// Disable unexecutable global action input for an AMP family without MANIPULATE.
+  /// Other controllers keep the existing action protection by default.
+  void setRobotActionStateEnabled(bool enabled);
   void setAllowWalkingDuringAction(bool allow) noexcept
   {
     allow_walking_during_action_.store(allow, std::memory_order_relaxed);
@@ -125,12 +142,23 @@ public:
   //waao
   void resetCommandState(bool stance_mode = true);
   void overrideCommandState(const CommandDataRL& command);
+  /// Warm handoff: copy filter state, not source scaling/biases.
+  void inheritCommandState(const RlGaitReceiver& source);
+  void setCommandFilter(std::shared_ptr<GaitCommandFilter> filter);
   void setSwitchVelocityScale(double scale);
   
   void setReuseWalkCommandInStance(bool enable);
   void setAmpHandController(bool enable);
   void setCommandBufferCallback(std::function<bool()> callback);
   void resetVelocityState();
+
+  // 忽略所有 twist 速度指令（/cmd_vel），直接将速度清零
+  // （供配置文件 ignoreTwistCmd=true 的屏蔽速度指令的控制器使用）
+  void setIgnoreTwistCmd(bool ignore);
+
+  /// Mask executed gait commands without changing cached joystick/smoothing state.
+  /// A blocked walking gate emits zero twist and the requested stance flag.
+  void setExecutionGate(bool blocked, bool stance);
 
   // Get current command data
   CommandDataRL getCurrentCommand() const;
@@ -155,6 +183,7 @@ public:
   bool isInPlaceWalkingCommand(double linear_thresh, double angular_thresh) const;
 
 private:
+  void overrideCommandStateLocked(const CommandDataRL& command);
   // ROS callbacks
   void cmdVelCallback(const geometry_msgs::Twist::ConstPtr& msg);
   void cmdPoseCallback(const geometry_msgs::Twist::ConstPtr& msg);
@@ -164,6 +193,10 @@ private:
   /// 动作期间是否允许继续行走：v17 或控制器本地原子标志
   bool resolveAllowWalkingDuringAction() const;
   void syncPostureToCommand();
+
+  /// Apply standing-only and execution gates to an output copy. Cached input
+  /// is preserved by the execution gate; standing-only mode always wins.
+  CommandDataRL sanitizeGaitCommandLocked(const CommandDataRL& command) const;
   
   // Smart stop detection functions
   bool checkSmartStopConditions(const vector_t& torsostate, const vector_t& feetPositions);
@@ -195,6 +228,7 @@ private:
   // Current command data
   CommandDataRL currentCommand_;
   double switch_velocity_scale_ = 1.0;
+  std::shared_ptr<GaitCommandFilter> command_filter_;
   bool enabled_;
   /// 通用的姿态目标覆盖。业务层决定何时设置/释放，Receiver 只负责平滑跟踪。
   bool posture_target_override_active_{false};
@@ -203,10 +237,14 @@ private:
   bool is_amp_hand_controller_{false};
   bool is_v17_{false};  ///< /robot_version==17：动作期间不 suppress 行走
   bool robot_action_active_{false};
+  bool robot_action_input_enabled_{true};
   std::atomic_bool allow_walking_during_action_{false};
   ros::Time last_robot_action_active_time_;
   double robot_action_active_timeout_{0.5};
   std::function<bool()> command_buffer_callback_;
+  bool ignore_twist_cmd_{false};  ///< 忽略所有 twist 指令与行走步态请求（屏蔽速度指令的控制器）
+  bool execution_gate_blocked_{false};
+  bool execution_gate_stance_{false};
 
   // Smart stop detection parameters
   bool smart_stop_enabled_;

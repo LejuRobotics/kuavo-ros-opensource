@@ -223,6 +223,8 @@ def _parse_system_status_response(response):
         param7 = response[10]  # BAT2电压
 
         return {
+            # 采样时刻，供下游判断该帧是否仍然新鲜
+            '_sample_time': time.time(),
             # 原始字节
             'status_byte1': param1,
             'status_byte2': param2,

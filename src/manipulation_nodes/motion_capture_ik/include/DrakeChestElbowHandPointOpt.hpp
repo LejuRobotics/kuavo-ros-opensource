@@ -158,6 +158,43 @@ class DrakeChestElbowHandPointOptSolver final {
     // that temporarily ignores the caller's chest position/orientation locks.
   }
 
+  bool resetDaggerArmReference(const UpperBodyPoseList& fk, bool left, bool right) {
+    auto valid = [&](UpperBodySide side) {
+      const auto& shoulder = fk[side][SHOULDER].p;
+      const auto& elbow = fk[side][ELBOW].p;
+      const auto& hand = fk[side][HAND].p;
+      return shoulder.allFinite() && elbow.allFinite() && hand.allFinite() &&
+             (elbow - shoulder).norm() > 1e-9 && (hand - elbow).norm() > 1e-9;
+    };
+    // Validate both requested sides before changing any state.
+    if ((left && !valid(LEFT)) || (right && !valid(RIGHT))) return false;
+    if (left) {
+      pLeftElbowPrev_ = fk[LEFT][ELBOW].p;
+      pLeftHandPrev_ = fk[LEFT][HAND].p;
+      u1LeftPrev_ = normalizeSafe(pLeftElbowPrev_ - fk[LEFT][SHOULDER].p);
+      u2LeftPrev_ = normalizeSafe(pLeftHandPrev_ - pLeftElbowPrev_);
+    }
+    if (right) {
+      pRightElbowPrev_ = fk[RIGHT][ELBOW].p;
+      pRightHandPrev_ = fk[RIGHT][HAND].p;
+      u1RightPrev_ = normalizeSafe(pRightElbowPrev_ - fk[RIGHT][SHOULDER].p);
+      u2RightPrev_ = normalizeSafe(pRightHandPrev_ - pRightElbowPrev_);
+    }
+    // Rebase only the selected arm's past positions: its initial velocity,
+    // acceleration and jerk are zero; the other arm and sample times survive.
+    for (auto& sample : historySample2_) {
+      if (left) {
+        sample.p1Left = pLeftElbowPrev_;
+        sample.p2Left = pLeftHandPrev_;
+      }
+      if (right) {
+        sample.p1Right = pRightElbowPrev_;
+        sample.p2Right = pRightHandPrev_;
+      }
+    }
+    return true;
+  }
+
   DrakeChestElbowHandSolution solve(const Eigen::Vector3d& pChestRef,
                                     const Eigen::Quaterniond& qChestRef,  // unit quaternion, yaw/pitch-only; roll=0
                                     const Eigen::Vector3d& pLeftElbowRef,
@@ -168,18 +205,23 @@ class DrakeChestElbowHandPointOptSolver final {
                                     bool updateChestPosition = true,
                                     bool freezeChestPosition = true,
                                     double leftElbowTrackingActivation = 1.0,
-                                    double rightElbowTrackingActivation = 1.0) {
+                                    double rightElbowTrackingActivation = 1.0,
+                                    bool daggerFixChestToReference = false) {
     using drake::symbolic::Expression;
 
-    syncCachedPointsFromCachedState();  // 防御性初始化，确保cached points与cached state一致
+    // DAgger's explicit per-arm reset supplies current world-space FK points.
+    // Rebuilding them from the previous torso here would undo that reset.
+    if (!daggerFixChestToReference) {
+      syncCachedPointsFromCachedState();  // 防御性初始化，确保cached points与cached state一致
+    }
 
     const double solveStampSec = steadyClockNowSec();
     const bool enableUpdateFlagsByCaller = successfulSolveCount_ >= kUpdateFlagWarmupSuccessFrames;
     const bool updateChestOrientationEffective = enableUpdateFlagsByCaller ? updateChestOrientation : true;
     const bool updateChestPositionEffective = enableUpdateFlagsByCaller ? updateChestPosition : true;
-    const Eigen::Vector3d pChestRefEffective = updateChestPositionEffective ? pChestRef : pChestPrev_;
+    const Eigen::Vector3d pChestRefEffective = (daggerFixChestToReference || updateChestPositionEffective) ? pChestRef : pChestPrev_;
     const Eigen::Quaterniond qChestRefEffective =
-        updateChestOrientationEffective ? qChestRef.normalized() : qPrev_.normalized();
+        (daggerFixChestToReference || updateChestOrientationEffective) ? qChestRef.normalized() : qPrev_.normalized();
     const auto [yawPrev, pitchPrev] = yawPitchFromQuatZYYawPitch(qPrev_);
 
     drake::solvers::MathematicalProgram prog;
@@ -202,17 +244,33 @@ class DrakeChestElbowHandPointOptSolver final {
     // -----------------------------
     // Bounds constraints (box)
     // -----------------------------
-    prog.AddBoundingBoxConstraint(boundsConfig_.chestLb, boundsConfig_.chestUb, pChest);           // chest box
+    if (daggerFixChestToReference) {
+      prog.AddBoundingBoxConstraint(pChestRef, pChestRef, pChest);
+    } else {
+      prog.AddBoundingBoxConstraint(boundsConfig_.chestLb, boundsConfig_.chestUb, pChest);
+    }
     prog.AddBoundingBoxConstraint(boundsConfig_.leftHandLb, boundsConfig_.leftHandUb, p2Left);     // left hand box
     prog.AddBoundingBoxConstraint(boundsConfig_.rightHandLb, boundsConfig_.rightHandUb, p2Right);  // right hand box
+    if (daggerFixChestToReference) {
+      const auto angles = yawPitchFromQuatZYYawPitch(qChestRefEffective);
+      const double target = angles.first;
+      prog.AddBoundingBoxConstraint(target, target, yaw);
+    } else {
     prog.AddBoundingBoxConstraint(boundsConfig_.yawLb, boundsConfig_.yawUb, yaw);                  // yaw 1 dim limit
+    }
+    if (daggerFixChestToReference) {
+      const auto angles = yawPitchFromQuatZYYawPitch(qChestRefEffective);
+      const double target = angles.second;
+      prog.AddBoundingBoxConstraint(target, target, pitch);
+    } else {
     prog.AddBoundingBoxConstraint(boundsConfig_.pitchLb, boundsConfig_.pitchUb, pitch);            // pitch 1 dim limit
-    if (!updateChestPositionEffective && freezeChestPosition) {
+    }
+    if (!daggerFixChestToReference && !updateChestPositionEffective && freezeChestPosition) {
       for (int i = 0; i < 3; ++i) {
         prog.AddConstraint(pChest(i) == pChestPrev_(i));
       }
     }
-    if (!updateChestOrientationEffective) {
+    if (!daggerFixChestToReference && !updateChestOrientationEffective) {
       prog.AddBoundingBoxConstraint(yawPrev, yawPrev, yaw);
       prog.AddBoundingBoxConstraint(pitchPrev, pitchPrev, pitch);
     }
@@ -392,9 +450,12 @@ class DrakeChestElbowHandPointOptSolver final {
     // -----------------------------
     // Warm-start from cached previous solution
     // -----------------------------
-    prog.SetInitialGuess(pChest, pChestPrev_);
-    prog.SetInitialGuess(yaw, yawPrev);
-    prog.SetInitialGuess(pitch, pitchPrev);
+    prog.SetInitialGuess(pChest, daggerFixChestToReference ? pChestRef : pChestPrev_);
+    const auto initialAngles = daggerFixChestToReference
+                                   ? yawPitchFromQuatZYYawPitch(qChestRefEffective)
+                                   : std::make_pair(yawPrev, pitchPrev);
+    prog.SetInitialGuess(yaw, initialAngles.first);
+    prog.SetInitialGuess(pitch, initialAngles.second);
     prog.SetInitialGuess(u1Left, u1LeftPrev_);
     prog.SetInitialGuess(u2Left, u2LeftPrev_);
     prog.SetInitialGuess(u1Right, u1RightPrev_);

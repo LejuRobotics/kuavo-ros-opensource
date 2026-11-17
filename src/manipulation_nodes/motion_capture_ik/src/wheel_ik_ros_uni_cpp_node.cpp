@@ -56,6 +56,7 @@ ArmIdx wheelGetCtrlArmIdx(ros::NodeHandle& nodeHandle) {
 
 static ros::NodeHandle* g_nh = nullptr;
 static std::atomic<bool> g_teardown_done{false};
+static std::atomic<bool> g_manage_vr_incremental_mode{true};
 
 static bool callVrIncrementalService(ros::NodeHandle& nh,
                                      const std::string& service_name,
@@ -105,6 +106,7 @@ static bool callVrIncrementalService(ros::NodeHandle& nh,
 
 static void setupVrIncrementalMode(ros::NodeHandle& nh)
 {
+  if (!g_manage_vr_incremental_mode.load()) return;
   ROS_INFO("[wheel_ik] Configuring VR incremental mode via controller services (blocking until success)...");
   constexpr bool kBlockUntilSuccess = true;
   if (!callVrIncrementalService(nh, "/enable_vr_arm_kpkd", true, kBlockUntilSuccess)) {
@@ -121,6 +123,7 @@ static void setupVrIncrementalMode(ros::NodeHandle& nh)
 
 static void teardownVrIncrementalMode()
 {
+  if (!g_manage_vr_incremental_mode.load()) return;
   if (g_teardown_done.exchange(true) || !g_nh) return;
   ROS_INFO("[wheel_ik] Restoring VR incremental mode parameters to default...");
   callVrIncrementalService(*g_nh, "/enable_vr_arm_kpkd", false, false);
@@ -141,6 +144,9 @@ int main(int argc, char** argv) {
   // Initialize ROS node（关闭默认 SIGINT 处理，由 signalHandler 接管）
   ros::init(argc, argv, "ik_ros_uni_cpp_node", ros::init_options::NoSigintHandler);
   ros::NodeHandle nodeHandle;
+  bool daggerCandidateOnly = false;
+  nodeHandle.param("/quest3/dagger_candidate_only", daggerCandidateOnly, false);
+  g_manage_vr_incremental_mode.store(!daggerCandidateOnly);
   g_nh = &nodeHandle;
   signal(SIGINT,  signalHandler);
   signal(SIGTERM, signalHandler);

@@ -22,6 +22,15 @@ namespace humanoid_controller
 {
   class AmpWalkController : public RLControllerBase
   {
+  protected:
+    // 供派生控制器（如 AmpWildImpController）复用 AMP 的完整实现，
+    // 仅替换控制器类型与配置文件（观测/推理/指令映射完全一致）
+    AmpWalkController(const std::string& name,
+                      RLControllerType type,
+                      const std::string& config_file,
+                      ros::NodeHandle& nh,
+                      ocs2::humanoid::TopicLogger* ros_logger = nullptr);
+
   public:
     AmpWalkController(const std::string& name,
                       const std::string& config_file,
@@ -36,6 +45,12 @@ namespace humanoid_controller
     void pause() override;
     void resume() override;
     void resumeWarm() override;
+
+    // Configure before starting inference. Family members always log separately;
+    // only the selected child also owns the legacy observation topics.
+    void setFamilyObservationOwner(std::function<bool()> is_owner) {
+      observation_owner_ = std::move(is_owner);
+    }
 
     /**
      * @brief 是否请求退出当前 RL 模式（与 RLControllerBase 一致）
@@ -56,7 +71,6 @@ namespace humanoid_controller
      * 使用从配置文件加载的velocityLimits_设置速度限制
      */
     void updateVelocityLimitsParam(ros::NodeHandle& nh) override;
-    
     /**
      * @waao 计算当前的关节参考
      */
@@ -74,7 +88,9 @@ namespace humanoid_controller
     void resetGaitCommandState(bool stance_mode = true) override;
     bool getGaitCommandState(ocs2::humanoid::CommandDataRL& command) const override;
     void setGaitCommandState(const ocs2::humanoid::CommandDataRL& command) override;
+    void inheritGaitCommandState(const AmpWalkController& source);
     void setSwitchVelocityScale(double scale) override;
+    void setGaitExecutionGate(bool blocked, bool stance) override;
     void setCommandBufferCallback(std::function<bool()> callback) override;
     void setExternalCommandBufferCallback(std::function<bool()> callback) override;
     bool hasNearZeroGaitCommand(double linear_thresh, double angular_thresh) const override;
@@ -83,6 +99,25 @@ namespace humanoid_controller
     bool allowsWalkingDuringArmAction() const noexcept override;
 
   protected:
+    // Optional postprocessing before the existing PD and joint-command mapping.
+    virtual void processJointReference(Eigen::VectorXd&) {}
+    ocs2::humanoid::RlGaitReceiver* gaitReceiver() { return gait_receiver_.get(); }
+    const Eigen::Matrix<double, 4, 1>& commandVelocityLimits() const { return velocityLimits_; }
+    ov::CompiledModel& policyModel() { return compiled_model_; }
+    CommandDataRL policyCommand() const { return gait_receiver_->getPolicyCommand(); }
+    void publishPolicyObservation(const std::string& field, const Eigen::VectorXd& value);
+
+    // 阻抗控制配置查询（供手臂阻抗服务回调使用）
+    bool armImpedanceEnabled() const { return arm_impedance_enabled_; }
+    bool armCartesianImpedanceEnabled() const { return arm_cartesian_impedance_enabled_; }
+
+    /// 是否实机（/is_real），供派生控制器复用，避免重复读同一参数
+    bool isRealRobot() const { return is_real_; }
+
+    // 是否忽略所有 twist 指令（/cmd_vel）与 scalar command：由配置文件 ignoreTwistCmd 控制。
+    // 屏蔽 twist 与行走步态输入；模型仍可根据受力或手臂角度变化产生运动。
+    bool ignore_twist_cmd_ = false;
+
     // 主循环：从 RLControllerBase::update 调用
     bool updateImpl(const ros::Time& time,
                     const SensorData& sensor_data,
@@ -118,6 +153,7 @@ namespace humanoid_controller
                          kuavo_msgs::jointCmd& joint_cmd) override;
 
   private:
+    std::function<bool()> observation_owner_;
     // === 来自 humanoidController_rl.cpp::loadSettings 的关键参数 ===
     double dt_{0.002};                    // 控制周期，和 /wbc_frequency 一致
     double actionScale_{1.0};
@@ -143,6 +179,23 @@ namespace humanoid_controller
 
     // 观测相关
     int frameStack_{1};
+    // frameStack 覆盖开关（如 amp_wild 六帧输入）：
+    // frameStackOverrideEnabled=true 时用 frameStackOverride 覆盖 frameStack_，
+    // 缺省（false）时保持 info 中 frameStack 原值，不影响其他 AMP 控制器。
+    bool frameStackOverrideEnabled_{false};
+    int frameStackOverride_{6};
+    // term-major 布局开关（H6 六帧模型专用）：
+    // frameStackTermMajor=true 时，networkInputDataRL_ 按训练端（mjlab observation_manager）
+    // term-major 顺序堆叠：[term0: f0..f5][term1: f0..f5]...[termN: f0..f5]，
+    // 即每个观测 term 的所有帧连续（与默认 frame-major 逐帧拼接相反）。
+    // 缺省（false）时保持逐帧拼接（frame-major），不影响其它控制器。
+    bool frameStackTermMajor_{false};
+    // waao：热启动清历史开关（WAQ 多帧模型用）：
+    // clearHistoryOnWarmResume=true 时 resumeWarm() 清零 inputDeque_ 历史帧，与训练端 reset 零填充一致，
+    // 避免走切跑时带入上一次运行残留的历史；缺省（false）保持原热启动行为。
+    bool clearHistoryOnWarmResume_{false};
+    std::atomic<bool> clear_history_requested_{false};
+    ros::Time last_pause_time_;  // 最近一次 pause 的时间，用于判断热启动时历史是否已过期
     int numSingleObs_{0};
     std::vector<std::string> singleInputDataKeys_;
     std::deque<Eigen::VectorXd> inputDeque_; // 用于多个历史的存储输入
@@ -209,6 +262,31 @@ namespace humanoid_controller
     std::unique_ptr<WaistController> waist_controller_; ///< 腰部控制器
     std::function<bool()> external_command_buffer_callback_;
     bool waist_zero_tracking_enabled_{false}; ///< 行走时是否启用腰部0位跟踪（忽略RL输出，强制跟踪默认位置）
+
+    // ==================== 手臂阻抗控制配置（柔顺交互，Phase 1/2） ====================
+    // 仅 amp_wild_imp_rl_param.info 会写入 armImpedance / armCartesianImpedance 段，
+    // 其他控制器不配置则全部保持默认值（false/空），行为完全不变。
+    bool arm_impedance_enabled_{false};                    ///< 关节空间阻抗是否启用（模式3）
+    Eigen::VectorXd arm_impedance_kp_;                     ///< 关节阻抗刚度（arm-sized，默认空）
+    Eigen::VectorXd arm_impedance_kd_;                     ///< 关节阻抗阻尼（arm-sized，默认空）
+    int arm_impedance_target_source_{0};                   ///< 0=弹簧回默认位，1=保持进入时位姿
+    double arm_impedance_max_joint_vel_{1.5};              ///< 关节最大速度限制 (rad/s)
+    double arm_impedance_force_limit_{20.0};               ///< 关节力矩上限 (N·m)
+    bool arm_impedance_use_cst_{true};                     ///< 使用 CST 力矩模式（避免 PDO 覆盖）
+    bool arm_obs_input_enabled_{true};                     ///< 阻抗模式下手臂观测是否喂给模型（armImpedance.obsInputEnabled；true=真实值，false=清零隔离）
+    double arm_obs_pitch_clip_deg_{0.0};                   ///< 喂给模型的手臂 pitch（肩/腕 pitch）角度限幅（armImpedance.obsPitchClipDeg，度；<=0 关闭）
+    double arm_obs_elbow_clip_deg_{0.0};                    ///< 喂给模型的肘关节角度限幅（armImpedance.obsElbowClipDeg，度；<=0 时沿用 obsPitchClipDeg）
+    bool arm_impedance_lock_wrist_{true};                  ///< 阻抗模式（模式3）锁死手腕关节（armImpedance.lockWristJoints；true=手腕目标固定默认位，CSP+高增益锁定，不参与柔顺）
+    double arm_impedance_handover_duration_{0.0};           ///< 退出阻抗时手臂（joint_q + kp/kd）过渡时长（armImpedance.handoverDuration；<=0 关闭）
+    double arm_impedance_switch_guard_deg_{10.0};           ///< 阻抗模式下允许切出控制器的手臂关节最大偏差（armImpedance.switchGuardDeg，度；<=0 关闭门禁）
+    bool arm_elbow_follow_enabled_{false};                  ///< 肘随肩pitch负向随动（armImpedance.elbowFollowEnabled；仅模式3，CSP位置控制）
+    double arm_elbow_follow_ratio_{0.5};                    ///< 随动比例系数 k（armImpedance.elbowFollowRatio）
+    double arm_elbow_follow_max_offset_deg_{30.0};          ///< 随动角度上限（度，armImpedance.elbowFollowMaxOffsetDeg；<=0 不限制）
+    bool arm_cartesian_impedance_enabled_{false};          ///< 笛卡尔空间阻抗是否启用（模式4）
+    double arm_cartesian_kx_{100.0};                       ///< 笛卡尔平移刚度 (N/m)
+    double arm_cartesian_dx_{5.0};                         ///< 笛卡尔平移阻尼 (N·s/m)
+    int arm_cartesian_ee_frame_mode_{0};                   ///< 0=zarm_l7_end_effector，1=zarm_r7_end_effector
+    double arm_cartesian_force_est_gain_{10.0};            ///< 外力估计增益（动量观测器），0=禁用
 
     // 站立切换到行走时的支撑腿髋关节roll偏置参数
     double stanceToWalkHipRollBias_{0.0}; ///< 初始偏置值（弧度）

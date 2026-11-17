@@ -13,10 +13,14 @@ spec = importlib.util.spec_from_file_location('identity', ROOT/'scripts/absolute
 identity = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(identity)
 
+RESOLVED_VERSIONS = (
+    '60', '61', '62', '63', '200062', '210062', '300062', '310062', '400062', '400063',
+)
+
 
 class IdentityTest(unittest.TestCase):
     def test_all_models_explicit_and_environment(self):
-        for version in ('60', '61', '62', '63', '200062', '300062', '400062', '400063'):
+        for version in RESOLVED_VERSIONS:
             self.assertEqual(identity.resolve([], {'ROBOT_VERSION': version})[0], version)
             self.assertEqual(identity.resolve(['robot_version:=' + version],
                              {'ROBOT_VERSION': 'bad'})[0], version)
@@ -59,7 +63,7 @@ class IdentityTest(unittest.TestCase):
                                   env=env, capture_output=True, text=True)
 
     def test_wrapper_autodetect_and_explicit_override(self):
-        for version in ('60', '61', '62', '63', '200062', '300062', '400062', '400063'):
+        for version in RESOLVED_VERSIONS:
             for entry in ('quest_velocity_ik.launch', 'load_kuavo_real_velocity_ik.launch',
                           'load_kuavo_mujoco_velocity_ik.launch',
                           'load_kuavo_absolute_sim_base.launch', 'control.launch'):

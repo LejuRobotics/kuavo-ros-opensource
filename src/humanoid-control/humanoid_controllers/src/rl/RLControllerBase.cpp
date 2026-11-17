@@ -590,6 +590,19 @@ using namespace ocs2;
       }
       last_cycle_start = cycle_start;
 
+      // Only policies with history/reset synchronization opt into this lock.
+      std::unique_lock<std::recursive_mutex> cycle_lock;
+      if (auto* cycle_mutex = inferenceCycleMutex())
+      {
+        cycle_lock = std::unique_lock<std::recursive_mutex>(*cycle_mutex);
+        if (!shouldRunInference() || !sensor_data_updated_)
+        {
+          cycle_lock.unlock();
+          inference_rate.sleep();
+          continue;
+        }
+      }
+
       // 从存储的成员变量获取传感器数据和状态
       SensorData sensors_data = getRobotSensorData();
       Eigen::VectorXd measuredRbdState = getRobotState();
@@ -612,6 +625,7 @@ using namespace ocs2;
         }
       }
       
+      if (cycle_lock.owns_lock()) cycle_lock.unlock();
       inference_rate.sleep();
     }
     

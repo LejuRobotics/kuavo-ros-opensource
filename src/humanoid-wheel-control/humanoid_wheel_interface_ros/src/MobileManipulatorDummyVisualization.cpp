@@ -355,7 +355,11 @@ void MobileManipulatorDummyVisualization::publishObservation(const ros::Time& ti
       claw_state_msg.header.stamp = timeStamp;
       claw_state_msg.header.frame_id = "leju_claw";
       claw_state_msg.data.name = {"left_claw", "right_claw"};
-      claw_state_msg.data.position = {claw_joint_positions_[0], claw_joint_positions_[1]};
+      // The public message uses opening percentage, while visualization stores radians.
+      auto toPercent = [](double angle) {
+        return std::max(0.0, std::min(100.0, (angle + 0.6981317008) / 0.6981317008 * 100.0));
+      };
+      claw_state_msg.data.position = {toPercent(claw_joint_positions_[0]), toPercent(claw_joint_positions_[1])};
       claw_state_msg.data.velocity.resize(2, 0.0);
       claw_state_msg.data.effort.resize(2, 0.0);
       claw_state_msg.state = {kuavo_msgs::lejuClawState::kReached, kuavo_msgs::lejuClawState::kReached};

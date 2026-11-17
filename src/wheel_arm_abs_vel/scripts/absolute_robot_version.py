@@ -9,7 +9,6 @@ import sys
 import re
 
 
-
 def checked(value, source):
     if not re.fullmatch(r'[1-9][0-9]{0,8}', str(value)):
         raise ValueError('invalid ROBOT_VERSION from %s: %r' % (source, value))
@@ -29,11 +28,10 @@ def resolve(args, environ):
 
 def main():
     try:
-        version, source = resolve(sys.argv[1:], os.environ)
+        version, _ = resolve(sys.argv[1:], os.environ)
     except ValueError as exc:
-        print('[absolute startup] ERROR: ' + str(exc), file=sys.stderr)
-        return 2
-    print('[absolute startup] robot_version=%s source=%s' % (version, source), file=sys.stderr, flush=True)
+        print(exc, file=sys.stderr)
+        return 1
     print(version)
     return 0
 

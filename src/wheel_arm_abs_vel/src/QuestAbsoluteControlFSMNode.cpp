@@ -149,7 +149,7 @@ namespace ocs2
 
             // 轮臂 v61/v62/v63：VR 专用限速，与 G12/北通遥控的 /mobile_manipulator_joy/* 分离
             if (robot_type_ == 1 &&
-                (robot_version_int_ == 61 || robot_version_int_ == 62 || robot_version_int_ == 63 || robot_version_int_ == 210062 || robot_version_int_ == 310062 || robot_version_int_ == 400062))
+                (robot_version_int_ == 61 || robot_version_int_ == 62 || robot_version_int_ == 63 || robot_version_int_ == 210062 || robot_version_int_ == 310062 || robot_version_int_ == 400062 || robot_version_int_ == 410062 || robot_version_int_ == 410063))
             {
                 nodeHandle.param("/vr_cmd_vel/linear_scale_x", c_relative_base_limit_[0], 0.4);
                 nodeHandle.param("/vr_cmd_vel/linear_scale_y", c_relative_base_limit_[1], 0.4);

@@ -123,6 +123,8 @@ void RlGaitReceiver::setEnabled(bool enable)
   enabled_ = enable;
   if (!enabled_)
   {
+    // A source is briefly paused/resumed during live blending. Its velocity smoothing
+    // state must survive; cold activation and execution gates reset explicitly.
     posture_target_override_active_ = false;
     posture_target_override_ = geometry_msgs::Twist();
   }
@@ -131,6 +133,7 @@ void RlGaitReceiver::setEnabled(bool enable)
 void RlGaitReceiver::resetToStance()
 {
   std::lock_guard<std::mutex> lock(command_mutex_);
+  if (command_filter_) command_filter_->reset();
   currentCommand_.setzero();
   currentCommand_.cmdStance_ = 1.0;
   smoothed_cmd_vel_.linear.x = 0.0;
@@ -152,8 +155,9 @@ bool RlGaitReceiver::isEnabled() const
 void RlGaitReceiver::resetCommandState(bool stance_mode)
 {
   std::lock_guard<std::mutex> lock(command_mutex_);
+  if (command_filter_) command_filter_->reset();
   currentCommand_.setzero();
-  currentCommand_.cmdStance_ = stance_mode ? 1.0 : 0.0;
+  currentCommand_.cmdStance_ = (stance_mode || ignore_twist_cmd_) ? 1.0 : 0.0;
   smoothed_cmd_vel_.linear.x = 0.0;
   smoothed_cmd_vel_.linear.y = 0.0;
   smoothed_cmd_vel_.linear.z = 0.0;
@@ -177,6 +181,47 @@ void RlGaitReceiver::resetCommandState(bool stance_mode)
 void RlGaitReceiver::overrideCommandState(const CommandDataRL& command)
 {
   std::lock_guard<std::mutex> lock(command_mutex_);
+  overrideCommandStateLocked(command);
+}
+
+void RlGaitReceiver::inheritCommandState(const RlGaitReceiver& source)
+{
+  if (&source == this) return;
+  std::scoped_lock lock(command_mutex_, source.command_mutex_);
+  overrideCommandStateLocked(source.sanitizeGaitCommandLocked(source.currentCommand_));
+  // Preserve this receiver's latest raw input/configuration. The source output
+  // already contains its velocity dip and lateral compensation, so only copy
+  // the underlying filter. Honor source blocking and target standing-only mode.
+  const bool zero_velocity = ignore_twist_cmd_ || source.ignore_twist_cmd_ || source.execution_gate_blocked_;
+  if (command_filter_) {
+    if (zero_velocity) command_filter_->reset();
+    else command_filter_->inherit(source.command_filter_.get());
+  }
+  smoothed_cmd_vel_ = zero_velocity ? geometry_msgs::Twist() : source.smoothed_cmd_vel_;
+  previous_cmd_vel_ = smoothed_cmd_vel_;
+  last_velocity_update_time_ = ros::Time::now();
+  currentCommand_.cmdVelLineX_ = smoothed_cmd_vel_.linear.x * switch_velocity_scale_;
+  currentCommand_.cmdVelLineY_ = smoothed_cmd_vel_.linear.y * switch_velocity_scale_;
+  currentCommand_.cmdVelLineZ_ = smoothed_cmd_vel_.linear.z * switch_velocity_scale_;
+  currentCommand_.cmdVelAngularX_ = smoothed_cmd_vel_.angular.x * switch_velocity_scale_;
+  currentCommand_.cmdVelAngularY_ = smoothed_cmd_vel_.angular.y * switch_velocity_scale_;
+  currentCommand_.cmdVelAngularZ_ = smoothed_cmd_vel_.angular.z * switch_velocity_scale_;
+  // Source output includes the velocity envelope; keep the raw filter and
+  // the envelope separate so neither model's scale feeds back into the other.
+  if (!zero_velocity && command_filter_)
+    currentCommand_.cmdVelLineX_ = command_filter_->inheritedForwardVelocity(smoothed_cmd_vel_.linear.x) * switch_velocity_scale_;
+  if (command_filter_) currentCommand_ = command_filter_->filterOutput(currentCommand_);
+  if (!zero_velocity) applyYDirectionCompensation();
+}
+
+void RlGaitReceiver::setCommandFilter(std::shared_ptr<GaitCommandFilter> filter)
+{
+  std::lock_guard<std::mutex> lock(command_mutex_);
+  command_filter_ = std::move(filter);
+}
+
+void RlGaitReceiver::overrideCommandStateLocked(const CommandDataRL& command)
+{
   currentCommand_.cmdVelLineX_ = command.cmdVelLineX_;
   currentCommand_.cmdVelLineY_ = command.cmdVelLineY_;
   currentCommand_.cmdVelLineZ_ = command.cmdVelLineZ_;
@@ -186,6 +231,17 @@ void RlGaitReceiver::overrideCommandState(const CommandDataRL& command)
   currentCommand_.cmdPostureSquatHeight_ = command.cmdPostureSquatHeight_;
   currentCommand_.cmdPostureTrunkPitch_ = command.cmdPostureTrunkPitch_;
   currentCommand_.cmdStance_ = command.cmdStance_;
+
+  // ignore_twist_cmd_（纯站立控制器，如 amp_wild_imp_controller 配置 ignoreTwistCmd=true）：
+  // 外部推入的 gait 指令（典型来源：控制器切换时 RLControllerManager::setGaitCommandState()
+  // 把源控制器的 gait command 同步给目标控制器）同样不允许带入任何 twist，
+  // 否则从行走控制器切到本控制器会把源控制器的速度/旋转指令直接灌进来。
+  if (ignore_twist_cmd_)
+  {
+    currentCommand_ = sanitizeGaitCommandLocked(currentCommand_);
+    ROS_INFO("[RlGaitReceiver] Externally pushed gait command ignored "
+             "(ignore_twist_cmd=true): twist (incl. rotation) zeroed, forced to stance");
+  }
 
   if (currentCommand_.cmdStance_ >= 0.5)
   {
@@ -221,6 +277,7 @@ void RlGaitReceiver::setCommandBufferCallback(std::function<bool()> callback)
 void RlGaitReceiver::resetVelocityState()
 {
   std::lock_guard<std::mutex> lock(command_mutex_);
+  if (command_filter_) command_filter_->reset();
   currentCommand_.setzero();
   stance_dwell_gate_.reset();
   smoothed_cmd_vel_.linear.x = 0.0;
@@ -233,6 +290,38 @@ void RlGaitReceiver::resetVelocityState()
   last_velocity_update_time_ = ros::Time::now();
   last_cmd_vel_msg_time_ = ros::Time::now();
   stopInPlaceStepping();
+}
+
+void RlGaitReceiver::setIgnoreTwistCmd(bool ignore)
+{
+  std::lock_guard<std::mutex> lock(command_mutex_);
+  if (ignore && command_filter_) command_filter_->reset();
+  ignore_twist_cmd_ = ignore;
+  if (ignore)
+  {
+    // 清零已平滑的速度命令
+    smoothed_cmd_vel_.linear.x = 0.0;
+    smoothed_cmd_vel_.linear.y = 0.0;
+    smoothed_cmd_vel_.linear.z = 0.0;
+    smoothed_cmd_vel_.angular.x = 0.0;
+    smoothed_cmd_vel_.angular.y = 0.0;
+    smoothed_cmd_vel_.angular.z = 0.0;
+    previous_cmd_vel_ = smoothed_cmd_vel_;
+    latest_cmd_vel_ = smoothed_cmd_vel_;
+    currentCommand_ = sanitizeGaitCommandLocked(currentCommand_);
+    pending_gait_name_.clear();
+    latest_gait_name_ = "stance";
+    trot_latched_ = false;
+    stopInPlaceStepping();
+  }
+}
+
+void RlGaitReceiver::setExecutionGate(bool blocked, bool stance)
+{
+  std::lock_guard<std::mutex> lock(command_mutex_);
+  if (blocked && command_filter_) command_filter_->reset();
+  execution_gate_blocked_ = blocked;
+  execution_gate_stance_ = stance;
 }
 
 void RlGaitReceiver::update(const ros::Time& time, const vector_t& torsostate, const vector_t& feetPositions)
@@ -279,6 +368,15 @@ void RlGaitReceiver::update(const ros::Time& time, const vector_t& torsostate, c
 
   syncPostureToCommand();
 
+  if (ignore_twist_cmd_)
+  {
+    if (command_filter_) command_filter_->reset();
+    currentCommand_ = sanitizeGaitCommandLocked(currentCommand_);
+    pending_gait_name_.clear();
+    stopInPlaceStepping();
+    return;
+  }
+
   if (!pending_gait_name_.empty() && !command_blocked)
   {
     const std::string gait_name = pending_gait_name_;
@@ -292,7 +390,18 @@ void RlGaitReceiver::update(const ros::Time& time, const vector_t& torsostate, c
     ROS_INFO_STREAM("[RlGaitReceiver] Applied pending walking gait after controller switch: " << gait_name);
   }
 
-  double velocity_magnitude = calculateVelocityMagnitude(smoothed_cmd_vel_);
+  // The callback updates the legacy target. The envelope advances here even
+  // for a one-shot command, and feeds smart-stop decisions as well as policy.
+  geometry_msgs::Twist effective_velocity = smoothed_cmd_vel_;
+  const bool bypass = execution_gate_blocked_ || command_blocked || latest_cmd_vel_.linear.x < 0 ||
+      (currentCommand_.cmdStance_ == 1 && reuse_walk_command_in_stance_);
+  if (command_filter_) {
+    effective_velocity = command_filter_->update(effective_velocity, time.toSec(), bypass);
+  } else if (!bypass && !std::isfinite(effective_velocity.linear.x)) {
+    // Preserve the finite-value guard even without controller-specific shaping.
+    effective_velocity.linear.x = 0;
+  }
+  double velocity_magnitude = calculateVelocityMagnitude(effective_velocity);
   // sim-to-sim: 站立模式下复用行走三维指令（x/y/yaw）作为姿态命令通道。
   // 这与训练侧 vel_command_b 的复用语义一致：x->弯腰，y->保留，yaw(z)->下蹲高度。
   if (currentCommand_.cmdStance_ == 1 && reuse_walk_command_in_stance_)
@@ -406,12 +515,12 @@ void RlGaitReceiver::update(const ros::Time& time, const vector_t& torsostate, c
     // Stop in-place stepping when there's significant velocity command
     stopInPlaceStepping();
     
-    currentCommand_.cmdVelLineX_ = smoothed_cmd_vel_.linear.x * switch_velocity_scale_;
-    currentCommand_.cmdVelLineY_ = smoothed_cmd_vel_.linear.y * switch_velocity_scale_;
-    currentCommand_.cmdVelLineZ_ = smoothed_cmd_vel_.linear.z * switch_velocity_scale_;
-    currentCommand_.cmdVelAngularX_ = smoothed_cmd_vel_.angular.x * switch_velocity_scale_;
-    currentCommand_.cmdVelAngularY_ = smoothed_cmd_vel_.angular.y * switch_velocity_scale_;
-    currentCommand_.cmdVelAngularZ_ = smoothed_cmd_vel_.angular.z * switch_velocity_scale_;
+    currentCommand_.cmdVelLineX_ = effective_velocity.linear.x * switch_velocity_scale_;
+    currentCommand_.cmdVelLineY_ = effective_velocity.linear.y * switch_velocity_scale_;
+    currentCommand_.cmdVelLineZ_ = effective_velocity.linear.z * switch_velocity_scale_;
+    currentCommand_.cmdVelAngularX_ = effective_velocity.angular.x * switch_velocity_scale_;
+    currentCommand_.cmdVelAngularY_ = effective_velocity.angular.y * switch_velocity_scale_;
+    currentCommand_.cmdVelAngularZ_ = effective_velocity.angular.z * switch_velocity_scale_;
     currentCommand_.cmdStance_ = 0; // Walking mode
     stance_dwell_gate_.reset();
     
@@ -426,7 +535,23 @@ void RlGaitReceiver::update(const ros::Time& time, const vector_t& torsostate, c
 CommandDataRL RlGaitReceiver::getCurrentCommand() const
 {
   std::lock_guard<std::mutex> lock(command_mutex_);
-  return currentCommand_;
+  return sanitizeGaitCommandLocked(currentCommand_);
+}
+
+CommandDataRL RlGaitReceiver::sanitizeGaitCommandLocked(const CommandDataRL& command) const
+{
+  if (!ignore_twist_cmd_ && !execution_gate_blocked_)
+  {
+    return command_filter_ ? command_filter_->filterOutput(command) : command;
+  }
+  // Mask all six twist components at both command outputs, including commands
+  // supplied by handover, stepping, or joystick callbacks.
+  CommandDataRL sanitized = command;
+  sanitized.cmdVelLineX_ = sanitized.cmdVelLineY_ = sanitized.cmdVelLineZ_ = 0.0;
+  sanitized.cmdVelAngularX_ = sanitized.cmdVelAngularY_ = sanitized.cmdVelAngularZ_ = 0.0;
+  // SOFT's standing-only constraint takes precedence over a family stop gate.
+  sanitized.cmdStance_ = (ignore_twist_cmd_ || execution_gate_stance_) ? 1.0 : 0.0;
+  return sanitized;
 }
 
 Eigen::Vector2d RlGaitReceiver::getCurrentPostureCommand() const
@@ -509,7 +634,8 @@ CommandDataRL RlGaitReceiver::getPolicyCommand() const
   {
     command.setzero();
   }
-  return command;
+  std::lock_guard<std::mutex> lock(command_mutex_);
+  return sanitizeGaitCommandLocked(command);
 }
 
 bool RlGaitReceiver::shouldBlockCommandExecution() const
@@ -556,6 +682,7 @@ void RlGaitReceiver::cmdVelCallback(const geometry_msgs::Twist::ConstPtr& msg)
   if (robot_action_active && !allow_walking)
   {
     std::lock_guard<std::mutex> lock(command_mutex_);
+    if (command_filter_) command_filter_->reset();
     latest_cmd_vel_ = geometry_msgs::Twist();
     smoothed_cmd_vel_ = geometry_msgs::Twist();
     previous_cmd_vel_ = geometry_msgs::Twist();
@@ -570,7 +697,18 @@ void RlGaitReceiver::cmdVelCallback(const geometry_msgs::Twist::ConstPtr& msg)
   if (command_buffer_callback && command_buffer_callback())
   {
     std::lock_guard<std::mutex> lock(command_mutex_);
-    latest_cmd_vel_ = *msg;
+    if (ignore_twist_cmd_)
+    {
+      // 纯站立控制器（ignoreTwistCmd=true）在 buffer 分支同样清零：
+      // 否则 latest_cmd_vel_ 保留非零 twist，update() 会把 cmdStance_ 误翻转为 0(walking)
+      latest_cmd_vel_ = geometry_msgs::Twist();
+      smoothed_cmd_vel_ = geometry_msgs::Twist();
+      previous_cmd_vel_ = geometry_msgs::Twist();
+    }
+    else
+    {
+      latest_cmd_vel_ = *msg;
+    }
     ROS_DEBUG_THROTTLE(1.0, "[RlGaitReceiver] Block cmd_vel until walking controller is active");
     return;
   }
@@ -579,9 +717,13 @@ void RlGaitReceiver::cmdVelCallback(const geometry_msgs::Twist::ConstPtr& msg)
   std::lock_guard<std::mutex> lock(command_mutex_);
   ros::Time current_time = ros::Time::now();
   last_cmd_vel_msg_time_ = current_time;
-  geometry_msgs::Twist smoothed_vel = smoothVelocityCommand(*msg, current_time);
-  
-  latest_cmd_vel_ = *msg;
+  // ignore_twist_cmd_：twist 全 6 维（linear x/y/z + angular x/y/z，含旋转）直接清零
+  geometry_msgs::Twist vel_msg = ignore_twist_cmd_ ? geometry_msgs::Twist() : *msg;
+  geometry_msgs::Twist smoothed_vel = smoothVelocityCommand(vel_msg, current_time);
+
+  // ignore_twist_cmd_ 时 latest_cmd_vel_ 也必须清零，
+  // 否则 stance 分支会因 latest_cmd_vel_ 非零把 cmdStance 误切到 0(walking)
+  latest_cmd_vel_ = ignore_twist_cmd_ ? geometry_msgs::Twist() : *msg;
   smoothed_cmd_vel_ = smoothed_vel;
   
   ROS_DEBUG("[RlGaitReceiver] Received velocity command: lin(%.3f, %.3f, %.3f) ang(%.3f, %.3f, %.3f)",
@@ -616,10 +758,21 @@ void RlGaitReceiver::cmdPoseCallback(const geometry_msgs::Twist::ConstPtr& msg)
             smoothed_pose.linear.z, smoothed_pose.angular.y);
 }
 
+void RlGaitReceiver::setRobotActionStateEnabled(bool enabled)
+{
+  std::lock_guard<std::mutex> lock(command_mutex_);
+  robot_action_input_enabled_ = enabled;
+  if (!enabled) {
+    robot_action_active_ = false;
+    last_robot_action_active_time_ = ros::Time();
+  }
+}
+
 void RlGaitReceiver::robotActionStateCallback(const humanoid_plan_arm_trajectory::RobotActionState::ConstPtr& msg)
 {
   const bool active = msg->state == 1;
   std::lock_guard<std::mutex> lock(command_mutex_);
+  if (!robot_action_input_enabled_) return;
   if (active)
   {
     last_robot_action_active_time_ = ros::Time::now();
@@ -634,6 +787,7 @@ void RlGaitReceiver::robotActionStateCallback(const humanoid_plan_arm_trajectory
   const bool allow_walking = resolveAllowWalkingDuringAction();
   if (robot_action_active_ && !allow_walking)
   {
+    if (command_filter_) command_filter_->reset();
     currentCommand_.setzero();
     stance_dwell_gate_.reset();
     latest_cmd_vel_ = geometry_msgs::Twist();
@@ -691,6 +845,7 @@ void RlGaitReceiver::gaitNameCallback(const std_msgs::String::ConstPtr& msg)
   
   // Manually switch cmdStance_ state based on gait name
   if (gait_name == "stance") {
+    if (command_filter_) command_filter_->reset();
     pending_gait_name_.clear();
     currentCommand_.setzero();
     currentCommand_.cmdStance_ = 1.0;
@@ -705,6 +860,13 @@ void RlGaitReceiver::gaitNameCallback(const std_msgs::String::ConstPtr& msg)
     smart_stop_enabled_ = true;
     ROS_INFO("[RlGaitReceiver] Manually switched to stance mode");
   } else if (gait_name == "walk" || gait_name == "trot") {
+    // ignore_twist_cmd_（纯站立控制器）：忽略行走步态请求，保持站立，
+    // 避免 /humanoid_mpc_gait_name_request 把 cmdStance 切到 0(walking)
+    if (ignore_twist_cmd_)
+    {
+      ROS_INFO_STREAM("[RlGaitReceiver] Ignore walking gait request (ignore_twist_cmd=true): " << gait_name);
+      return;
+    }
     if (command_blocked)
     {
       pending_gait_name_ = gait_name;

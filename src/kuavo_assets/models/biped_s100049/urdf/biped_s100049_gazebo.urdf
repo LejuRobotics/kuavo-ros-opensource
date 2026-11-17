@@ -894,29 +894,6 @@
     <limit lower="-0.523598775598299" upper="0.523598775598299" effort="12.0" velocity="5.23333333333333" />
     <dynamics damping="0.2" friction="0.0"/>
   </joint>
-  <link name="camera">
-    <inertial>
-      <origin xyz="-0.04257 -0.01736 -0.01161" rpy="0 0 0" />
-      <mass value="0.047" />
-      <inertia ixx="0.00065" ixy="0.0" ixz="0.00015" iyy="0.00091" iyz="0.0" izz="0.00105" />
-    </inertial>
-    <visual>
-      <origin xyz="0 0 0" rpy="0 0 0" />
-      <geometry>
-        <mesh filename="package://kuavo_assets/models/biped_s100049/meshes/camera.STL" />
-      </geometry>
-      <material name="">
-        <color rgba="1 1 1 1" />
-      </material>
-    </visual>
-  </link>
-  <joint name="camera" type="fixed">
-    <origin xyz="0.0967509784707853 0.0175003248712456 0.125953265112721" rpy="0 0.488692190558413 0" />
-    <parent link="zhead_2_link" />
-    <child link="camera" />
-    <dynamics damping="0.2" friction="0.0"/>
-  </joint>
-
   <link
     name="camera_base">
     <inertial>

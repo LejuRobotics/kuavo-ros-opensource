@@ -102,11 +102,12 @@ calibration:
   skip_first_last: true
 
 workflow:
-  # 一键流程按 30 点 torso—shoulder 最大两两差自动选 CTB 模式；经验门限。
-  # 任一手恢复出的固定变换超过位置或旋转门限时，拟合/独立验证都切到青瞳模式。
+  # 左右链各取一次原始 30 点位置均值；删点后不重算均值，同步剔除 pose。
   shoulder_stability:
-    max_translation_mm: 8.0
-    max_rotation_deg: 1.0
+    max_translation_mm: 8.0      # 任一点距原始均值 > 8 mm：数据质量错误，退出拟合
+    exclude_translation_mm: 3.0 # 任一链距原始均值 > 3 mm：剔除该 pose
+    max_excluded_poses: 3       # 需剔除的 pose 并集超过 3 个：退出拟合
+    max_rotation_deg: 1.0       # 旋转仅诊断，不参与退出/剔除
 
 kinematics:
   # 按本 YAML 所在目录解析；优化器按完整 ROBOT_VERSION 覆盖此默认值。
@@ -117,12 +118,12 @@ kinematics:
 
   # CTB: C(原始 torso 刚体) -> B(waist_yaw_link)，单位 mm / deg。
   ctb:
-    # 独立拟合默认 per_sample；一键流程按测量稳定性覆盖为 shared 或 per_sample。
-    mode: per_sample
+    # 默认共享 CTB；仅显式设为 per_sample 时逐点拟合，不按稳定性自动切换。
+    mode: shared
     translation_mm: [122.02, -45.82, 2.5]
     fit_translation: false
     fit_rotation: true
-    # 每个采集点独立拟合 CTB 旋转，同点双臂共用；相对 I 的总旋转角不超过此值。
+    # 仅逐点模式生效：同点双臂共用 CTB，相对 I 的总旋转角不超过此值。
     rotation_bound_deg: 3.0
     # 共享 CTB 模式初值；逐点 CTB 拟合/青瞳验证从 I 开始，不叠加此值。
     initial_rotvec_deg: [0.0, 0.0, 0.0]
@@ -152,11 +153,15 @@ kinematics:
   ei:
     translation_bound_mm: null
     rotation_bound_deg: null
+    # 旧版各向同性先验保持关闭；使用下方 optimizer 的三个正则权重。
     translation_prior_mm: 0.0
     rotation_prior_deg: 0.0
   optimizer:
-    translation_scale_mm: 2.0
-    rotation_scale_deg: 1.0
+    # Ei 正则项按 mm / deg 计算，残差乘 sqrt(weight)；0 关闭对应项。
+    EI_POSITION_WEIGHT: 100.0       # 增大 -> 更少 Ei xyz 位置偏置
+    EI_THETA_WEIGHT: 0.0001         # 减小 -> 更宽松地允许沿 URDF 关节局部轴的 theta
+    EI_OTHER_ROTATION_WEIGHT: 1.0   # 非轴向旋转，不等同于电机零点
+    # 求解器数值缩放内部默认平移 2 mm、旋转 1 deg，与上述正则权重独立。
     max_nfev: 250
     ftol: 1.0e-9
     xtol: 1.0e-9
@@ -165,7 +170,7 @@ kinematics:
   validation:
     # 仅控制 --validate-urdf：true 使用有界逐点 CTB；false 保留共享 CTB 的原验证方式。
     qingtong: false
-    max_position_error_mm: 50.0
+    max_position_error_mm: 13.0
 
   output_dir: ../output_s63
   urdf_final_name: urdf_final.urdf
