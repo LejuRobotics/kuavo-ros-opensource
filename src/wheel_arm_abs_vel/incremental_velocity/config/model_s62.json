@@ -1,0 +1,41 @@
+{
+  "velocity_ik_urdf": "biped_s62/urdf/biped_s62.urdf",
+  "velocity_ik_fixed_joints": [
+    "wheel_left_front_joint",
+    "wheel_right_front_joint",
+    "wheel_left_behind_joint",
+    "wheel_right_behind_joint",
+    "zhead_1_joint",
+    "zhead_2_joint"
+  ],
+  "velocity_ik_position_limits": {
+    "knee_joint": [
+      0.0,
+      1.448
+    ],
+    "zarm_l1_joint": [
+      -2.4,
+      0.6
+    ],
+    "zarm_r1_joint": [
+      -2.4,
+      0.6
+    ],
+    "zarm_l2_joint": [
+      -0.349065850398866,
+      1.46
+    ],
+    "zarm_r2_joint": [
+      -1.46,
+      0.349065850398866
+    ],
+    "zarm_l3_joint": [
+      -1.5707963267949,
+      0.46
+    ],
+    "zarm_r3_joint": [
+      -0.46,
+      1.5707963267949
+    ]
+  }
+}

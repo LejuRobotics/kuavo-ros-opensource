@@ -1,0 +1,63 @@
+{
+  "velocity_ik_urdf": "biped_s400062/urdf/biped_s400062.urdf",
+  "velocity_ik_fixed_joints": [
+    "wheel_left_front_joint",
+    "wheel_right_front_joint",
+    "wheel_left_behind_joint",
+    "wheel_right_behind_joint",
+    "zhead_1_joint",
+    "zhead_2_joint",
+    "l_thumb_j1",
+    "l_thumb_j2",
+    "l_thumb_j3",
+    "l_index_j1",
+    "l_index_j2",
+    "l_index_j3",
+    "l_middle_j1",
+    "l_middle_j2",
+    "l_little_j1",
+    "l_little_j2",
+    "l_little_j3",
+    "r_thumb_j1",
+    "r_thumb_j2",
+    "r_thumb_j3",
+    "r_index_j1",
+    "r_index_j2",
+    "r_index_j3",
+    "r_middle_j1",
+    "r_middle_j2",
+    "r_little_j1",
+    "r_little_j2",
+    "r_little_j3"
+  ],
+  "velocity_ik_position_limits": {
+    "knee_joint": [
+      0.0,
+      1.448
+    ],
+    "zarm_l1_joint": [
+      -2.4,
+      0.6
+    ],
+    "zarm_r1_joint": [
+      -2.4,
+      0.6
+    ],
+    "zarm_l2_joint": [
+      -0.349065850398866,
+      1.46
+    ],
+    "zarm_r2_joint": [
+      -1.46,
+      0.349065850398866
+    ],
+    "zarm_l3_joint": [
+      -1.5707963267949,
+      0.46
+    ],
+    "zarm_r3_joint": [
+      -0.46,
+      1.5707963267949
+    ]
+  }
+}

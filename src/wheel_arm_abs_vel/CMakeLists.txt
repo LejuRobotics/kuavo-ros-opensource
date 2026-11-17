@@ -22,11 +22,12 @@ find_package(Threads REQUIRED)
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(JSONCPP REQUIRED jsoncpp)
 add_message_files(FILES
+  DualQuestSample.msg IncrementalTeleopTcpTarget.msg IncrementalVelocityIkMapperStatus.msg
   DirectControllerInput.msg AbsoluteIkCommitDebug.msg QuestTcpMappingDebug.msg TeleopTcpTarget.msg
   VelocityIkFeasibilityDebug.msg VelocityIkInputDebug.msg VelocityIkMapperStatus.msg
   VelocityIkShadow.msg WholeBodyIkReference.msg)
 add_service_files(FILES ManualLowerBody.srv)
-generate_messages(DEPENDENCIES geometry_msgs std_msgs)
+generate_messages(DEPENDENCIES geometry_msgs std_msgs noitom_hi5_hand_udp_python)
 catkin_package(INCLUDE_DIRS include
   LIBRARIES wheel_absolute_controllers wheel_absolute_dynamics
   CATKIN_DEPENDS message_runtime roscpp rospy roslib std_msgs std_srvs sensor_msgs geometry_msgs nav_msgs visualization_msgs nodelet pluginlib kuavo_msgs kuavo_assets kuavo_common leju_utils humanoid_controllers humanoid_interface humanoid_interface_drake humanoid_interface_ros humanoid_wheel_interface humanoid_wheel_interface_ros humanoid_wheel_wbc motion_capture_ik noitom_hi5_hand_udp_python leju_mobile_base_msgs ocs2_core ocs2_msgs)
@@ -44,6 +45,7 @@ if(DEFINED ENV{KUAVO_STAGE_ABSOLUTE_HARDWARE})
   return()
 endif()
 add_subdirectory(velocity_ik)
+add_subdirectory(incremental_velocity)
 add_library(wheel_absolute_dynamics
   src/absolute/AbsoluteWbcBase.cpp src/absolute/AbsoluteWeightedWbc.cpp
   src/absolute/AbsoluteContactForceWbc.cpp src/RneaBackend.cpp)

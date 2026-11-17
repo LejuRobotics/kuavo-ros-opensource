@@ -107,6 +107,7 @@ namespace ocs2
             reference_file_ = referenceFile;
             const RobotVersion rb_version = RobotVersion::create(robot_version_int_);
 
+            incremental_velocity_ = nodeHandle.param<std::string>("/vr_ik/teleop_mode", "absolute") == "incremental";
             nodeHandle.param("/wheel_ik", wheel_ik_, false);
             ROS_INFO_STREAM("[QuestAbsoluteControlFSM] wheel_ik: " << (wheel_ik_ ? "true" : "false"));
             nodeHandle.param("/use_cpp_incremental_ik", use_cpp_incremental_ik_, false);
@@ -1406,7 +1407,7 @@ namespace ocs2
                 }
                 else if (joystick_data_.right_first_button_pressed &&
                          !(joystick_data_prev_.right_first_button_pressed &&
-                           (!enable_velocity_ik_takeover_ ||
+                           (incremental_velocity_ || !enable_velocity_ik_takeover_ ||
                             joystick_data_prev_.left_first_button_pressed))) // X+A：组合键上升沿，与按键先后无关
                 {
                     // 如果手臂碰撞控制中，手臂正在回归，回归完成会切换到手臂 KEEP 模式，此时再按 XA 继续手臂跟踪
@@ -1656,7 +1657,7 @@ namespace ocs2
                 }
                 else if (joystick_data_.right_first_button_pressed &&
                          !(joystick_data_prev_.right_first_button_pressed &&
-                           (!enable_velocity_ik_takeover_ ||
+                           (incremental_velocity_ || !enable_velocity_ik_takeover_ ||
                             joystick_data_prev_.left_first_button_pressed)))  // X+A：组合键上升沿，与按键先后无关
                 {
                     if (arm_collision_control_) {
@@ -2324,6 +2325,7 @@ namespace ocs2
         std::string reference_file_;
         int robot_version_int_{0};  // 机器人版本号
         bool wheel_ik_{false}; // 轮臂增量VR兼容模式开关
+        bool incremental_velocity_{false};
         bool use_cpp_incremental_ik_{false}; // 是否使用 C++ 增量式 IK（ik_ros_uni_cpp_node）
         bool enable_velocity_ik_takeover_{false};
         bool velocity_ik_virtual_paused_{false};
