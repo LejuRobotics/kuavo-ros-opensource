@@ -69,6 +69,9 @@ class Quest3BoneFramePublisher:
         self.listening_udp_ports_cnt = 0
 
         rospy.init_node('Quest3_bone_frame_publisher', anonymous=True)
+        self.publish_quest3_globals = bool(rospy.get_param('~publish_quest3_globals', True))
+        self.start_state_server = bool(rospy.get_param('~start_state_server', True))
+        self.connected_param = str(rospy.get_param('~connected_param', '') or '')
         self.reset_vr_torso_state = rospy.ServiceProxy('/quest3/reset_vr_torso_state', Trigger)
         self.vr_torso_state_reset = False
         rospy.on_shutdown(self.reset_vr_torso_state_on_shutdown)
@@ -135,7 +138,13 @@ class Quest3BoneFramePublisher:
         rospy.loginfo("Head reset service started at /quest3/reset_head_pose")
 
         # 初始化VR连接状态参数
-        rospy.set_param('/quest3/connected', False)
+        self._set_connected(False)
+
+    def _set_connected(self, connected):
+        if self.connected_param:
+            rospy.set_param(self.connected_param, connected)
+        if self.publish_quest3_globals:
+            rospy.set_param('/quest3/connected', connected)
 
     def set_robot_state_server(self, robot_state_server):
         """设置 RobotStateServer 引用
@@ -251,7 +260,7 @@ class Quest3BoneFramePublisher:
         sys.exit(0)
 
     def reset_vr_torso_state_on_shutdown(self):
-        if self.vr_torso_state_reset:
+        if not self.publish_quest3_globals or self.vr_torso_state_reset:
             return
 
         self.vr_torso_state_reset = True
@@ -285,7 +294,7 @@ class Quest3BoneFramePublisher:
                 self.sock.recvfrom(1024)
                 print(f"\033[92mAcknowledgment From Quest3 received on attempt {attempt + 1}, start to receiving data...\033[0m")
                 # 连接成功后设置参数服务器参数
-                rospy.set_param('/quest3/connected', True)
+                self._set_connected(True)
                 rospy.loginfo("VR连接成功！已设置参数: /quest3/connected=True")
                 return True
             except socket.timeout:
@@ -754,7 +763,7 @@ class Quest3BoneFramePublisher:
                         # never hit socket.timeout. Re-handshake before reset;
                         # do not accept an arbitrary reordered packet as fresh.
                         self._pose_mailbox.clear()
-                        rospy.set_param('/quest3/connected', False)
+                        self._set_connected(False)
                         if rospy.is_shutdown() or not self.restart_socket():
                             return
                         gate.reset()
@@ -783,7 +792,7 @@ class Quest3BoneFramePublisher:
                 self._pose_mailbox.clear()
                 self.joysticks_pub.publish(JoySticks())
                 require_button_release = True
-                rospy.set_param('/quest3/connected', False)
+                self._set_connected(False)
                 if rospy.is_shutdown() or not self.restart_socket():
                     return
                 gate.reset()
@@ -1097,13 +1106,15 @@ if __name__ == "__main__":
         print("\033[91mend_effector_type not found in rosparm, using from kuavo.json\033[0m")
     # RobotStateServer to Vr App
     subscribe_sensor_data = True # 订阅sensors_data_raw
-    robot_state_server = RobotStateServer(ee_type=ee_type, udp_port=15170, publish_rate=20, subscribe_sensor_data=subscribe_sensor_data)
-    if not robot_state_server.start():
-        print("\033[91mRobotStateServer 启动失败\033[0m")
-        sys.exit(1)
+    robot_state_server = None
+    if publisher.start_state_server:
+        robot_state_server = RobotStateServer(ee_type=ee_type, udp_port=15170, publish_rate=20, subscribe_sensor_data=subscribe_sensor_data)
+        if not robot_state_server.start():
+            print("\033[91mRobotStateServer 启动失败\033[0m")
+            sys.exit(1)
 
-    # 设置 robot_state_server 引用到 publisher，用于处理 hand wrench 请求
-    publisher.set_robot_state_server(robot_state_server)
+        # 设置 robot_state_server 引用到 publisher，用于处理 hand wrench 请求
+        publisher.set_robot_state_server(robot_state_server)
     #######################################################
 
     broadcast_ips = get_local_broadcast_ips()
@@ -1136,4 +1147,5 @@ if __name__ == "__main__":
         print("Failed to establish initial connection.")
 
     # Close the socket
-    robot_state_server.stop()
+    if robot_state_server is not None:
+        robot_state_server.stop()

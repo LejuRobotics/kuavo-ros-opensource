@@ -46,6 +46,24 @@ bash src/wheel_arm_abs_vel/scripts/platform_roslaunch.sh wheel_arm_abs_vel quest
 
 新版输入操作说明见 [Quest / Pico 按键、头控与终端 o](docs/pico_quest_controls.md)。
 
+## TEST 增量速度 IK
+
+在 ROS Noetic 工作区安装仓库要求的 Drake、Pinocchio 和 catkin_tools 后，于仓库根目录编译。已编译过的工作区可以复用现有构建产物。
+
+```bash
+source /opt/ros/noetic/setup.bash
+bash src/wheel_arm_abs_vel/scripts/build_workspace.sh
+source devel/setup.bash
+```
+
+两个终端都加载工作区环境，并将 `ROBOT_VERSION` 设为实际轮臂机型。第一个终端按原流程启动全身 IK 主控。第二个终端选择头显入口，例如 Quest 自动发现：
+
+```bash
+roslaunch wheel_arm_abs_vel quest_velocity_ik.launch ip_address:=auto teleop_mode:=incremental
+```
+
+Pico 使用 `pico_velocity_ik.launch teleop_mode:=incremental`。双 Quest 使用 `dual_quest_incremental_velocity_ik.launch`，传入两台头显各自的 `left_ip` 和 `right_ip`。单头显入口省略 `teleop_mode` 时使用绝对式。增量模式按住对应手柄侧扳机，以腕部锚点计算位移；松开后可单手重握，默认姿态采用绝对跟随。
+
 ## Selection
 
 Existing launch commands keep their existing behavior. The new selector defaults

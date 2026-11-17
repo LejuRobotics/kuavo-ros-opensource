@@ -1,0 +1,69 @@
+<?xml version='1.0' encoding='UTF-8'?>
+<launch>
+  <arg name="left_ip" />
+  <arg name="right_ip" />
+  <arg name="robot_version" default="$(optenv ROBOT_VERSION 62)" />
+  <arg name="ee_type" default="auto" />
+  <arg name="torso_control_side" default="left" />
+  <arg name="enable_head_control" default="true" />
+  <arg name="control_torso" default="true" />
+  <arg name="use_incremental_hand_orientation" default="false" />
+  <arg name="dual_input_contract" value="$(eval {True: True}[bool(arg('left_ip')) and bool(arg('right_ip')) and arg('left_ip').split(':')[0] != arg('right_ip').split(':')[0] and arg('torso_control_side') in ['left', 'right']])" />
+  <include file="$(find wheel_arm_abs_vel)/launch/quest_velocity_ik.launch" pass_all_args="true">
+    <arg name="teleop_mode" value="incremental" />
+    <arg name="external_quest_monitors" value="true" />
+    <arg name="robot_version" value="$(arg robot_version)" />
+    <arg name="ee_type" value="$(arg ee_type)" />
+    <arg name="torso_control_side" value="$(arg torso_control_side)" />
+    <arg name="control_torso" value="$(arg control_torso)" />
+    <arg name="use_incremental_hand_orientation" value="$(arg use_incremental_hand_orientation)" />
+    <arg name="enable_head_control" value="$(arg enable_head_control)" />
+  </include>
+  <node pkg="wheel_arm_abs_vel" type="monitor_quest3_velocity.py" name="$(eval 'monitor_quest3' if arg('torso_control_side') == 'left' else 'monitor_quest3_left')" args="$(arg left_ip)" output="screen" launch-prefix="$(find wheel_arm_abs_vel)/scripts/whole_body_ik_runtime.sh quest">
+    <param name="publish_quest3_globals" value="$(eval arg('torso_control_side') == 'left')" />
+    <param name="start_state_server" value="$(eval arg('torso_control_side') == 'left')" />
+    <param name="connected_param" value="/vr_left/connected" />
+    <param name="enable_head_control" value="$(eval arg('enable_head_control') and arg('torso_control_side') == 'left')" />
+    <param name="control_finger_tf_enabled" value="false" />
+    <param name="observation_tf_rate_hz" value="0.0" />
+    <remap from="/leju_quest_bone_poses" to="/vr_left/leju_quest_bone_poses" />
+    <remap from="quest_joystick_data" to="/vr_left/quest_joystick_data" />
+    <remap from="/robot_head_motion_data" to="$(eval '/robot_head_motion_data' if arg('torso_control_side') == 'left' else '/vr_left/robot_head_motion_data')" />
+    <remap from="/robot_chest_motion_data" to="$(eval '/robot_chest_motion_data' if arg('torso_control_side') == 'left' else '/vr_left/robot_chest_motion_data')" />
+    <remap from="/robot_head_pose" to="$(eval '/robot_head_pose' if arg('torso_control_side') == 'left' else '/vr_left/robot_head_pose')" />
+    <remap from="/robot_chest_pose" to="$(eval '/robot_chest_pose' if arg('torso_control_side') == 'left' else '/vr_left/robot_chest_pose')" />
+    <remap from="/quest3/hand_wrench_config" to="$(eval '/quest3/hand_wrench_config' if arg('torso_control_side') == 'left' else '/vr_left/quest3/hand_wrench_config')" />
+    <remap from="/quest_hand_finger_tf" to="$(eval '/quest_hand_finger_tf' if arg('torso_control_side') == 'left' else '/vr_left/quest_hand_finger_tf')" />
+    <remap from="/tf" to="$(eval '/tf' if arg('torso_control_side') == 'left' else '/vr_left/tf')" />
+    <remap from="/tf_static" to="$(eval '/tf_static' if arg('torso_control_side') == 'left' else '/vr_left/tf_static')" />
+    <remap from="/quest3/set_head_control_mode" to="$(eval '/quest3/set_head_control_mode' if arg('torso_control_side') == 'left' else '/vr_left/quest3/set_head_control_mode')" />
+    <remap from="/quest3/head_control_mode" to="$(eval '/quest3/head_control_mode' if arg('torso_control_side') == 'left' else '/vr_left/quest3/head_control_mode')" />
+    <remap from="/quest3/head_fixed_forward_user_intent" to="$(eval '/quest3/head_fixed_forward_user_intent' if arg('torso_control_side') == 'left' else '/vr_left/quest3/head_fixed_forward_user_intent')" />
+    <remap from="/quest3/input_timing" to="$(eval '/quest3/input_timing' if arg('torso_control_side') == 'left' else '/vr_left/quest3/input_timing')" />
+  </node>
+  <node pkg="wheel_arm_abs_vel" type="monitor_quest3_velocity.py" name="$(eval 'monitor_quest3' if arg('torso_control_side') == 'right' else 'monitor_quest3_right')" args="$(arg right_ip)" output="screen" launch-prefix="$(find wheel_arm_abs_vel)/scripts/whole_body_ik_runtime.sh quest">
+    <param name="publish_quest3_globals" value="$(eval arg('torso_control_side') == 'right')" />
+    <param name="start_state_server" value="$(eval arg('torso_control_side') == 'right')" />
+    <param name="connected_param" value="/vr_right/connected" />
+    <param name="enable_head_control" value="$(eval arg('enable_head_control') and arg('torso_control_side') == 'right')" />
+    <param name="control_finger_tf_enabled" value="false" />
+    <param name="observation_tf_rate_hz" value="0.0" />
+    <remap from="/leju_quest_bone_poses" to="/vr_right/leju_quest_bone_poses" />
+    <remap from="quest_joystick_data" to="/vr_right/quest_joystick_data" />
+    <remap from="/robot_head_motion_data" to="$(eval '/robot_head_motion_data' if arg('torso_control_side') == 'right' else '/vr_right/robot_head_motion_data')" />
+    <remap from="/robot_chest_motion_data" to="$(eval '/robot_chest_motion_data' if arg('torso_control_side') == 'right' else '/vr_right/robot_chest_motion_data')" />
+    <remap from="/robot_head_pose" to="$(eval '/robot_head_pose' if arg('torso_control_side') == 'right' else '/vr_right/robot_head_pose')" />
+    <remap from="/robot_chest_pose" to="$(eval '/robot_chest_pose' if arg('torso_control_side') == 'right' else '/vr_right/robot_chest_pose')" />
+    <remap from="/quest3/hand_wrench_config" to="$(eval '/quest3/hand_wrench_config' if arg('torso_control_side') == 'right' else '/vr_right/quest3/hand_wrench_config')" />
+    <remap from="/quest_hand_finger_tf" to="$(eval '/quest_hand_finger_tf' if arg('torso_control_side') == 'right' else '/vr_right/quest_hand_finger_tf')" />
+    <remap from="/tf" to="$(eval '/tf' if arg('torso_control_side') == 'right' else '/vr_right/tf')" />
+    <remap from="/tf_static" to="$(eval '/tf_static' if arg('torso_control_side') == 'right' else '/vr_right/tf_static')" />
+    <remap from="/quest3/set_head_control_mode" to="$(eval '/quest3/set_head_control_mode' if arg('torso_control_side') == 'right' else '/vr_right/quest3/set_head_control_mode')" />
+    <remap from="/quest3/head_control_mode" to="$(eval '/quest3/head_control_mode' if arg('torso_control_side') == 'right' else '/vr_right/quest3/head_control_mode')" />
+    <remap from="/quest3/head_fixed_forward_user_intent" to="$(eval '/quest3/head_fixed_forward_user_intent' if arg('torso_control_side') == 'right' else '/vr_right/quest3/head_fixed_forward_user_intent')" />
+    <remap from="/quest3/input_timing" to="$(eval '/quest3/input_timing' if arg('torso_control_side') == 'right' else '/vr_right/quest3/input_timing')" />
+  </node>
+  <node pkg="wheel_arm_abs_vel" type="run_incremental_dual_quest.py" name="incremental_dual_quest" output="screen" launch-prefix="$(find wheel_arm_abs_vel)/scripts/whole_body_ik_runtime.sh background">
+    <param name="torso_control_side" value="$(arg torso_control_side)" />
+  </node>
+</launch>
