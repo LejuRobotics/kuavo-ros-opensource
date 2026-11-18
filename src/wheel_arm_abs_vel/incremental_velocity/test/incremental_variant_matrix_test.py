@@ -58,7 +58,7 @@ class VariantMatrix(unittest.TestCase):
             tested.append(version)
         self.assertEqual(set(tested), {'60','61','62','63','200062','200063',
             '210062','300062','300063','310062','400062','400063',
-            '500062','500063','600062'})
+            '410062','410063','500062','500063','600062'})
         self.assertIn('400062',tested)
         print('VARIANT_MATRIX models='+','.join(tested)+' effectors='+','.join(sorted(SUPPORTED)))
 

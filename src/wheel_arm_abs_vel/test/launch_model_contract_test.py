@@ -32,6 +32,15 @@ class LaunchModelTest(unittest.TestCase):
             for field, expected in [('sg100_kp', 2.0), ('sg100_kd', 0.04), ('sg100_output_limit', 0.35)]:
                 self.assertEqual(cfg.params['/'+field].value, expected)
 
+    def test_shared_scripts_are_the_only_ros_node_candidates(self):
+        from roslib.packages import find_node
+
+        for name in ('ik_ros_velocity.py', 'absolute_end_effector.py'):
+            with self.subTest(name=name):
+                candidates = [Path(path).resolve()
+                              for path in find_node('wheel_arm_abs_vel', name)]
+                self.assertEqual(candidates, [PACKAGE / 'scripts' / name])
+
     def test_shared_model_contract_matches_both_entries(self):
         import json
         for version in (62, 63, 210062, 310062, 400062, 410062, 410063):
