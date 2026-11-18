@@ -6,9 +6,8 @@ create_udev_rule() {
     local product=$2
     echo 'KERNEL=="ttyUSB*", ACTION=="add", ATTRS{product}=="'$product'", MODE:="0777", ATTR{latency_timer}="1", SYMLINK+="'$rule_name'"' > /etc/udev/rules.d/$rule_name.rules
     echo "生成成功! 请重启计算机或者插拔设备以使规则生效。"
-    # Reload udev rules
+    # 只重新加载规则，不做全局 trigger，避免重放其他串口设备事件。
     udevadm control --reload-rules
-    udevadm trigger
 }
 
 # Get all ttyUSB devices

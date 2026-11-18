@@ -6,6 +6,7 @@ from humanoid_plan_arm_trajectory.srv import planArmTrajectoryBezierCurve, planA
 from humanoid_plan_arm_trajectory.msg import jointBezierTrajectory, bezierCurveCubicPoint
 from kuavo_msgs.srv import changeArmCtrlMode
 from utils.utils import get_start_end_frame_time, frames_to_custom_action_data_ocs2
+from utils.h12_log_serial import get_h12_log_channel_error
 import time
 import signal
 import datetime
@@ -189,6 +190,11 @@ def send_wifi_info_to_serial(serial_device="/dev/H12_log_channel", baudrate=5760
     :param baudrate: 波特率
     :return: bool, 发送是否成功
     """
+    h12_log_error = get_h12_log_channel_error(serial_device)
+    if h12_log_error:
+        print("拒绝打开 H12 日志串口：{}".format(h12_log_error))
+        return False
+
     try:
         wifi_info = get_wifi_info()
         # 构造指定格式的数据
@@ -222,6 +228,11 @@ def _wifi_report_loop(serial_device, baudrate, interval=1.0):
     :param interval: 上报间隔（秒）
     """
     global _wifi_report_stop_event
+    h12_log_error = get_h12_log_channel_error(serial_device)
+    if h12_log_error:
+        print("拒绝启动 H12 WiFi 上报：{}".format(h12_log_error))
+        return
+
     ser = None
     try:
         ser = serial.Serial(serial_device, baudrate, timeout=1)
@@ -582,7 +593,8 @@ def launch_humanoid_robot(real_robot=True,calibrate=False):
     if rospy.has_param("h12_log_channel"):
         log_channel_status = rospy.get_param("h12_log_channel")
         if log_channel_status is True:
-            if os.path.exists("/dev/H12_log_channel"):
+            h12_log_error = get_h12_log_channel_error()
+            if not h12_log_error:
                 # 启动 WiFi 信息持续上报（1秒间隔）
                 start_wifi_info_report("/dev/H12_log_channel", baudrate=57600, interval=1.0)
 
@@ -590,7 +602,7 @@ def launch_humanoid_robot(real_robot=True,calibrate=False):
                 log_channel_cmd_end = "2>&1 | sed -u -e 's/\\x1b\\[[0-9;]*[mK]//g' -e 's/$/\\r/' | stdbuf -oL tee /dev/H12_log_channel"
                 launch_cmd = f"{log_channel_cmd_start} {launch_cmd} {log_channel_cmd_end}"
             else:
-                rospy.logerr("未检测到 /dev/H12_log_channel 设备文件，请确认已加载遥控器串口 udev 规则并连接设备。")
+                rospy.logerr("H12 日志串口校验失败：%s", h12_log_error)
 
     print(f"launch_cmd: {launch_cmd}")
     print("If you want to check the session, please run 'tmux attach -t humanoid_robot'")
