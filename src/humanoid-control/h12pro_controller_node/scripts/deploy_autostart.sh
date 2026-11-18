@@ -217,21 +217,51 @@ else
   sudo ./creat_remote_udev_rule.sh
 fi
 
+cleanup_h12_log_rule() {
+    local rule_target="/etc/udev/rules.d/99-H12_log_serial.rules"
+    local log_link="/dev/H12_log_channel"
+    local old_target=""
+
+    echo "清理旧 H12 日志串口规则和链接..."
+    if [ -f "$rule_target" ]; then
+        sudo rm -f "$rule_target"
+        echo "已删除旧规则：$rule_target"
+    else
+        echo "旧规则不存在，无需删除。"
+    fi
+
+    # 只删除旧规则创建的软链接，绝不删除底层 ttyUSB 设备。
+    if [ -L "$log_link" ]; then
+        old_target="$(readlink -f "$log_link" 2>/dev/null || true)"
+        sudo rm -f "$log_link"
+        echo "已删除旧链接：$log_link -> $old_target"
+    else
+        echo "旧 H12 日志链接不存在，无需删除。"
+    fi
+
+    # 只 reload，不做全局 udev trigger。
+    sudo udevadm control --reload-rules
+}
+
 while true; do
-    echo "是否需要加载遥控器查看 log 使用串口的 udev 规则？确认有接线才可以使用。(y/n): "
+    echo "是否启用 H12 日志串口？(y=检测并安装规则，n=禁用并删除旧规则) (y/n): "
     read -r load_h12_log_channel
     if [[ "$load_h12_log_channel" == "y" || "$load_h12_log_channel" == "Y" ]]; then
-        if ls /dev | grep H12_log_channel; then
-            echo "遥控器设备文件已存在，无需加载规则。"
+        # 先清理旧规则，确保检测失败时也不会留下可误匹配 IMU 的历史规则。
+        cleanup_h12_log_rule
+        echo "正在检测并安装 H12 日志串口规则..."
+        cd "$SCRIPT_DIR"
+        sudo chmod +x load_h12_log_serial_rule.sh
+        if sudo ./load_h12_log_serial_rule.sh; then
+            echo "H12 日志串口规则安装完成。"
         else
-            echo "正在加载遥控器 udev 规则..."
-            cd $SCRIPT_DIR
-            sudo chmod +x load_h12_log_serial_rule.sh
-            sudo ./load_h12_log_serial_rule.sh                        
+            echo "未检测到有效的独立 H12 日志串口，不安装规则。"
+            echo "系统保持无 H12 日志规则状态，不影响 IMU。"
         fi
         break
     elif [[ "$load_h12_log_channel" == "n" || "$load_h12_log_channel" == "N" ]]; then
-        echo "跳过加载遥控器 udev 规则。"
+        echo "不启用 H12 日志串口，清理旧规则。"
+        cleanup_h12_log_rule
         break
     else
         echo "输入无效，请输入 y 或 n。"

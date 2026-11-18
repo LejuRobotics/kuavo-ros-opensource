@@ -58,5 +58,6 @@ channel_12	H滚轮       282-1722
 ```
 sudo cp usb_remote.rules /etc/udev/rules.d/
 sudo udevadm control --reload-rules
-sudo udevadm trigger
 ```
+
+不要执行全局 `udevadm trigger`。请重新插拔对应遥控器设备，或在维护窗口重启，使规则生效。
