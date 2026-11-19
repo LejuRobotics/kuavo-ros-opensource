@@ -6,6 +6,12 @@
 #   start_modbus_io_bridge.sh [设备路径] [__name:=xxx] [__log:=xxx] ...
 #   默认设备路径为 /dev/kuavo_pressure。
 
+HAS_HEIMAN=$(python3 -c 'import json, rospy; print(int("heiman" in json.loads(rospy.get_param("/kuavo_configuration"))["EndEffectorType"]))') || exit 1
+if [ "$HAS_HEIMAN" = "1" ]; then
+    echo "[modbus_io_bridge] heiman configured; skipping Modbus bridge"
+    exit 0
+fi
+
 if [ -n "$1" ] && [ "${1#__}" = "$1" ]; then
     PRESSURE_PORT="$1"
     shift
