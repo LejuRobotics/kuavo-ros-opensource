@@ -203,9 +203,9 @@ namespace humanoid_controller
   bool RLControllerManager::ampMpcSwitchReadyLocked() const
   {
     const auto* family = currentAmpFamilyLocked();
-    const auto now = ros::Time::now();
-    const bool fresh = !amp_mpc_sensor_stamp_.isZero() && now >= amp_mpc_sensor_stamp_ &&
-        (now - amp_mpc_sensor_stamp_).toSec() <= 0.1 && !amp_mpc_sample_wall_time_.isZero() &&
+    // sensor_time is an open-loop 1 ms integrator and drifts away from ros::Time.
+    // A changed stamp refreshes the wall clock, so this still rejects a frozen sample.
+    const bool fresh = !amp_mpc_sensor_stamp_.isZero() && !amp_mpc_sample_wall_time_.isZero() &&
         (ros::WallTime::now() - amp_mpc_sample_wall_time_).toSec() <= 0.1;
     return family && !outer_blend_active_ && family->canSwitchToMpc() && fresh && amp_mpc_stationary_;
   }
