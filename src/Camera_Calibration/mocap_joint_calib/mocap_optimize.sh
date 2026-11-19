@@ -131,6 +131,7 @@ case "${META_URDF##*/}" in
   # 完整版本优先于模板文件名，各基础型号的模板独立。
   biped_v3_arm_s53.urdf) URDF_LAYOUT="biped56"; BASE_URDF_HINT="53" ;;
   biped_v3_arm_s55.urdf) URDF_LAYOUT="biped56"; BASE_URDF_HINT="55" ;;
+  biped_v3_arm_s57.urdf) URDF_LAYOUT="biped56"; BASE_URDF_HINT="57" ;;
   biped_v3_arm_s56.urdf) URDF_LAYOUT="biped56" ;;
   biped_v3_arm_s62.urdf) URDF_LAYOUT="wheel62" ;;
   biped_v3_arm_s63.urdf) URDF_LAYOUT="wheel62"; BASE_URDF_HINT="63" ;;

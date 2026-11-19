@@ -46,8 +46,6 @@ namespace HighlyDynamic{
         std::string effective_version = rb_version.to_string();
         if (rb_version.to_string() == "15") {
             effective_version = "14";
-        } else if (rb_version.version_number() == 57) {
-            effective_version = "55";
         }
 
         auto robot_name = "kuavo_v" + effective_version;

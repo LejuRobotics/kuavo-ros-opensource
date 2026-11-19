@@ -1,6 +1,6 @@
 <launch>
     <arg name="robot_version" default="$(optenv ROBOT_VERSION 40)"/>
-    <arg name="resource_version" default="$(eval 55 if int(arg('robot_version')) == 57 else arg('robot_version'))"/>
+    <arg name="resource_version" default="$(arg robot_version)"/>
     <arg name="visualize" default="false"/>
     <!-- 6代轮臂(版本号 % 100 在 60~69): 使用上半身 URDF；其余代际默认 false -->
     <arg name="use_upper_body_urdf" default="$(eval 60 &lt;= int(arg('robot_version')) % 100 and int(arg('robot_version')) % 100 &lt; 70)"/>

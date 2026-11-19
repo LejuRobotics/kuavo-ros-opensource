@@ -397,6 +397,17 @@ class ArmBreakinStandalone:
                 elif version_num == 55 and can_bus_type == "dual_bus":
                     selected_node_name = self.arm_breakin_kuavo_v55_dual_node_name
                     self.print_colored(f"检测到机型：kuavo_v55_dual (版本 {version_num}, {can_bus_type})", Colors.GREEN)
+                elif version_num == 57 and can_bus_type == "dual_bus":
+                    ec_master_type_path = Path.home() / ".config" / "lejuconfig" / "EcMasterType.ini"
+                    try:
+                        ec_master_type = ec_master_type_path.read_text(encoding="utf-8").splitlines()[0].strip()
+                    except (OSError, IndexError):
+                        ec_master_type = ""
+                    if ec_master_type != "leju":
+                        self.print_colored(f"错误：57版本当前仅支持Leju驱动器，实际为 {ec_master_type or '未知'}", Colors.RED)
+                        return 1
+                    selected_node_name = self.arm_breakin_kuavo_v55_dual_node_name
+                    self.print_colored(f"检测到机型：kuavo_v57_dual，复用v55节点 (版本 {version_num}, {can_bus_type})", Colors.GREEN)
                 elif version_num == 56 and can_bus_type == "dual_bus":
                     selected_node_name = self.arm_breakin_kuavo_v56_dual_node_name
                     self.print_colored(f"检测到机型：kuavo_v56_dual (版本 {version_num}, {can_bus_type})", Colors.GREEN)
@@ -408,6 +419,7 @@ class ArmBreakinStandalone:
                     self.print_colored("  - 版本 52 + dual_bus -> kuavo_v52_dual", Colors.RED)
                     self.print_colored("  - 版本 53 + dual_bus -> kuavo_v53_dual", Colors.RED)
                     self.print_colored("  - 版本 55 + dual_bus -> kuavo_v55_dual", Colors.RED)
+                    self.print_colored("  - 版本 57 + dual_bus -> kuavo_v57_dual（复用v55节点）", Colors.RED)
                     self.print_colored("  - 版本 56 + dual_bus -> kuavo_v56_dual", Colors.RED)
                     return 1
             else:

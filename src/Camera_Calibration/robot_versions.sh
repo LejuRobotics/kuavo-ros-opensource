@@ -21,7 +21,7 @@
 #   apply_script|calib_config|calib_config_qingtong|shoulder_profile
 
 # shellcheck disable=SC2034
-RV_SUPPORTED_BASES="45 49 52 53 55 56 62 63"
+RV_SUPPORTED_BASES="45 49 52 53 55 56 57 62 63"
 
 rv_fold() {
   local v="${1:-}"
@@ -38,7 +38,7 @@ _rv_biped45_row() {
   echo "$1|biped45|biped_v3_arm_$3.urdf|biped_v3_arm_$3_calibrated.urdf|base_link|$2|false|14|true|apply_zero_deltas_to_arms_zero.py|calib_$3.yaml|calib_qingtong_$3.yaml|s45"
 }
 
-# 53/55/56 同属 biped56 布局，模板与输出独立；zhead_1_joint 相对 waist_yaw_link 的 Z 坐标统一为 0.49575 m。
+# 53/55/56/57 同属 biped56 布局，模板与输出独立；zhead_1_joint 相对 waist_yaw_link 的 Z 坐标统一为 0.49575 m。
 _rv_record() {
   local base
   base="$(rv_fold "${1:-}")"
@@ -48,6 +48,7 @@ _rv_record() {
     52) echo "52|biped52|biped_v3_arm.urdf|biped_v3_arm_calibrated.urdf|waist_yaw_link|false|true|14|true|apply_zero_deltas_to_arms_zero.py|calib.yaml|calib_qingtong.yaml|default" ;;
     53) echo "53|biped56|biped_v3_arm_s53.urdf|biped_v3_arm_s53_calibrated.urdf|waist_yaw_link|false|true|16|false|apply_zero_deltas_to_arms_zero.py|calib.yaml|calib_qingtong.yaml|default" ;;
     55) echo "55|biped56|biped_v3_arm_s55.urdf|biped_v3_arm_s55_calibrated.urdf|waist_yaw_link|false|true|16|false|apply_zero_deltas_to_arms_zero.py|calib.yaml|calib_qingtong.yaml|default" ;;
+    57) echo "57|biped56|biped_v3_arm_s57.urdf|biped_v3_arm_s57_calibrated.urdf|waist_yaw_link|false|true|16|false|apply_zero_deltas_to_arms_zero.py|calib.yaml|calib_qingtong.yaml|default" ;;
     56) echo "56|biped56|biped_v3_arm_s56.urdf|biped_v3_arm_s56_calibrated.urdf|waist_yaw_link|false|true|16|false|apply_zero_deltas_to_arms_zero.py|calib.yaml|calib_qingtong.yaml|default" ;;
     62) echo "62|wheel62|biped_v3_arm_s62.urdf|biped_v3_arm_s62_calibrated.urdf|waist_yaw_link|false|true|16|false|apply_zero_deltas_to_arms_zero_wheel62.py|calib.yaml|calib_qingtong.yaml|default" ;;
     63) echo "63|wheel62|biped_v3_arm_s63.urdf|biped_v3_arm_s63_calibrated.urdf|waist_yaw_link|false|true|16|false|apply_zero_deltas_to_arms_zero_wheel62.py|calib.yaml|calib_qingtong.yaml|default" ;;

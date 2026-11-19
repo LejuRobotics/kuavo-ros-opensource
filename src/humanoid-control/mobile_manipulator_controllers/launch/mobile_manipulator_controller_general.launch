@@ -9,7 +9,7 @@
   <arg name="visualize_humanoid" default="true"/>
   <arg name="visualize_mm" default="true"/>
   <arg name="robot_version" default="$(optenv ROBOT_VERSION 40)"/>
-  <arg name="resource_version" default="$(eval 55 if int(arg('robot_version')) == 57 else arg('robot_version'))"/>
+  <arg name="resource_version" default="$(arg robot_version)"/>
   <arg name="com_height" default="0.8"/> <!-- TODO: 需要根据实际情况更改 -->
 
   <!-- The URDF model of the robot -->

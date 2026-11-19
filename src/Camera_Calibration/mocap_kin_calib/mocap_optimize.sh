@@ -13,10 +13,10 @@ fi
 # mocap_kin_calib 内部其余脚本仍走 robot_variants.py 的严格编码校验，两者对
 # 合法基础型号族（53/55/56 双足、62/63 轮臂）的判定一致。
 case "$((10#$VERSION % 100))" in
-  53|55|56) DEFAULT_CONFIG="${SCRIPT_DIR}/config/calib_s56.yaml" ;;
+  53|55|56|57) DEFAULT_CONFIG="${SCRIPT_DIR}/config/calib_s56.yaml" ;;
   62|63) DEFAULT_CONFIG="${SCRIPT_DIR}/config/calib_s63.yaml" ;;
   *)
-    echo "[ERROR] 运动学标定当前支持基础版本 53/55/56/62/63 及对应小版本（当前=${VERSION}，折回 $((10#$VERSION % 100))）" >&2
+    echo "[ERROR] 运动学标定当前支持基础版本 53/55/56/57/62/63 及对应小版本（当前=${VERSION}，折回 $((10#$VERSION % 100))）" >&2
     exit 2
     ;;
 esac

@@ -181,6 +181,20 @@ class BreakinMainController:
             return v == 56
         except (ValueError, TypeError):
             return False
+
+    def _is_robot_version_57(self):
+        robot_version = self._get_robot_version()
+        if not robot_version:
+            return False
+
+        rv_raw = str(robot_version).strip()
+        rv = rv_raw.lower()
+        if "v57" in rv or "kuavo5_v57" in rv:
+            return True
+        try:
+            return int(rv_raw) == 57
+        except (ValueError, TypeError):
+            return False
     
     def _select_leg_breakin_dir(self):
         """根据 ROBOT_VERSION 选择腿部磨线目录
@@ -238,6 +252,8 @@ class BreakinMainController:
 
         if self._is_robot_version_53():
             return "leg_breakin_kuavo5_v53"
+        if self._is_robot_version_57():
+            return "leg_breakin_kuavo5_v55"
         if self._is_robot_version_55():
             return "leg_breakin_kuavo5_v55"
         if self._is_robot_version_56():

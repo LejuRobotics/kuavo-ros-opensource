@@ -17,6 +17,7 @@ _VERSION_REGISTRY=(
     "52|52|kuavo5|普通kuavo5"
     "53|53|kuavo5|手臂pitch电机改ruiwo"
     "55|55|kuavo5|手臂部分电机改ruiwoPA4310"
+    "57|57|kuavo5|55基础上2/8/13关节使用单圈编码器"
     "60|60|kuavo5w|悟时底盘轮臂"
     "61|61|kuavo5w|玖物底盘轮臂"
     "13|13|roban|roban2.0版本"

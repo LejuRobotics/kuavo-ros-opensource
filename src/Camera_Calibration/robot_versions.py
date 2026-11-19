@@ -24,14 +24,15 @@
 53      biped56     biped_v3_arm_s53.urdf          waist_yaw_link   否      支持    16      否
 55      biped56     biped_v3_arm_s55.urdf          waist_yaw_link   否      支持    16      否
 56      biped56     biped_v3_arm_s56.urdf          waist_yaw_link   否      支持    16      否
+57      biped56     biped_v3_arm_s57.urdf          waist_yaw_link   否      支持    16      否
 62      wheel62     biped_v3_arm_s62.urdf          waist_yaw_link   否      支持    16      否
 63      wheel62     biped_v3_arm_s63.urdf          waist_yaw_link   否      支持    16      否
 ======  ==========  =============================  ===============  ======  ======  ======  ======
 
 几点说明
 --------
-* 53/55/56 共用 ``biped56`` 布局，分别使用自身的标定 URDF 和输出文件。
-  S53/S55/S56 的 zhead_1_joint 相对 waist_yaw_link 的 Z 坐标统一为 0.49575 m，
+* 53/55/56/57 共用 ``biped56`` 布局，分别使用自身的标定 URDF 和输出文件。
+  S53/S55/S56/S57 的 zhead_1_joint 相对 waist_yaw_link 的 Z 坐标统一为 0.49575 m，
   小版本分别使用基础型号的模板。
   模板保留既有手臂几何；小版本的机械安装差异仍需按实机核对。
 * 62/63 的 200062/300062/400062/500062、400063/500063 与 ``biped_s62`` 关节顺序一致，
@@ -143,6 +144,12 @@ _BIPED53 = {
     "calibrated_urdf": "biped_v3_arm_s53_calibrated.urdf",
 }
 
+_BIPED57 = {
+    **_BIPED56,
+    "urdf": "biped_v3_arm_s57.urdf",
+    "calibrated_urdf": "biped_v3_arm_s57_calibrated.urdf",
+}
+
 _WHEEL62 = dict(
     layout="wheel62",
     urdf="biped_v3_arm_s62.urdf",
@@ -189,6 +196,11 @@ TABLE: Dict[str, ModelSpec] = {
         note="S55 系列使用低头部安装的 biped_v3_arm_s55.urdf",
         **_BIPED55,
     ),
+    "57": ModelSpec(
+        base="57", head_rot180=False, supports_wrist=True, zero_slots=16, ec_l1_r1=False,
+        note="S57 使用独立标定模板及输出，布局与 S55 一致",
+        **_BIPED57,
+    ),
     "56": ModelSpec(
         base="56", head_rot180=False, supports_wrist=True, zero_slots=16, ec_l1_r1=False,
         **_BIPED56,
@@ -205,7 +217,7 @@ TABLE: Dict[str, ModelSpec] = {
     ),
 }
 
-_BASE_ORDER = ("45", "49", "52", "53", "55", "56", "62", "63")
+_BASE_ORDER = ("45", "49", "52", "53", "55", "56", "57", "62", "63")
 
 
 def fold(version: object) -> str:

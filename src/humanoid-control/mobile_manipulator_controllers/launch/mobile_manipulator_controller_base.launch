@@ -9,7 +9,7 @@
   <arg name="visualize_humanoid" default="true"/>
   <arg name="visualize_mm" default="false"/>
   <arg name="robot_version" default="$(optenv ROBOT_VERSION 40)"/>
-  <arg name="resource_version" default="$(eval 55 if int(arg('robot_version')) == 57 else arg('robot_version'))"/>
+  <arg name="resource_version" default="$(arg robot_version)"/>
 
   <!-- The URDF model of the robot -->
   <!-- <arg name="urdfFile"    value="$(find kuavo_assets)/models/biped_s42/urdf/biped_s42_l.urdf" /> -->

@@ -272,6 +272,10 @@ print(f"\033[1;33m机器人型号: {robot_type}, 驱动器类型: {g_EcMasterCon
 def main():
     # 注意：运行时长不再从stdin读取，而是由主程序通过ROS话题 /breakin/can_start_new_round 控制
     
+    if g_EcMasterConfig.robot_version == 57 and g_EcMasterConfig.driver_type != "leju":
+        print(f"[Leju57] Only Leju drivers are supported, actual={g_EcMasterConfig.driver_type!r}")
+        return 1
+
     # 获取当前脚本所在目录
     script_dir = Path(__file__).parent.absolute()
     ec_log_dir = script_dir / "EC_log"
@@ -360,5 +364,7 @@ def main():
         if success:
             print("\033[1;32m✓ Kuavo5V55磨线运动完成\033[0m")
 
+    return 0 if success else 1
+
 if __name__ == "__main__":
-    main()
+    sys.exit(main())
