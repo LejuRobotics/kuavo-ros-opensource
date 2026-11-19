@@ -14,6 +14,8 @@
 #include <sensor_msgs/JointState.h>
 #include <std_msgs/Bool.h>
 #include <std_msgs/Float64MultiArray.h>
+#include <std_msgs/String.h>
+#include <std_msgs/UInt32.h>
 #include <std_srvs/SetBool.h>
 
 // ROS Messages
@@ -115,6 +117,19 @@ namespace humanoidController_wheel_wbc
     // zeroBase=true 底盘段置零（启动语义）；false 取 state 底盘段（恢复锚定）
     vector_t buildTargetPoseFromState(const vector_t& state, bool zeroBase);
     void computeObservationFromSensorData(const SensorData& sensorData, const vector6_t& odomData);
+
+    // 里程计异常时停止向 MPC 送观测并暂停求解。返回 true 表示本拍已锁存或已处于保持，调用方应直接返回。
+    // 返回 true 表示本拍已保持、调用方应直接返回。返回 false 时 odom_out 为可进入 MPC 的样本。
+    bool guardOdomAndHold(const ros::Time& time, bool sensor_ok, const SensorData& sensorData, vector6_t& odom_out);
+    // 返回 true 表示该帧不可进入 MPC。code/detail 仅在返回 true 时有效。
+    // accepted 为 true 时 odom 可以写入观测；尚未建立基线且本拍没有新鲜数据时 accepted 为 false，不锁存。
+    bool assessOdomSample(bool seen, const vector6_t& odom, const ros::Time& stamp, double steady_age_sec,
+                          uint32_t& code, std::string& detail, bool& accepted);
+    void latchOdomFault(uint32_t code, const std::string& detail);
+    void publishOdomFaultHold(const ros::Time& time, bool sensor_ok, const SensorData& sensorData);
+    // 启动时看本机 NTP 是否开启。开着只告警，不阻止启动。
+    void warnIfHostNtpService();
+    bool buildHoldJointCmdFromSensor(const ros::Time& time, const SensorData& sensorData, kuavo_msgs::jointCmd& cmd) const;
 
     // ========== 关节控制相关函数 ==========
     void updateUserJointCmd(const ros::Time &time, vector_t& target_qpos, vector_t& target_qvel);
@@ -225,6 +240,8 @@ namespace humanoidController_wheel_wbc
     ros::Publisher waistYawKinematicPublisher_;  // waist_yaw_link运动学计算位置发布器
     ros::Publisher lbLegTrajPub_;  // lb_leg_traj话题发布者，用于外部MPC模式下的VR躯干控制
     ros::Publisher stopRobotPub_;  // /stop_robot 话题发布者，用于底盘急停保护
+    ros::Publisher odomFaultCodePub_;  // /humanoid_wheel/error_code，锁存
+    ros::Publisher odomFaultMsgPub_;   // /humanoid_wheel/error_msg，锁存
     ros::Publisher armTrajFilteredPub_;  // 滤波后手臂轨迹发布者（用于互相关测量相位延迟）
     ros::Publisher resetToStatePub_;  // /mobile_manipulator_reset_to_state 发布者（3791 软暂停恢复时把冻结姿态发给 RM）
     // 双手末端 FK 的 PoseStamped 发布者，对应 /sensors_data_raw/ee_fk/<末端帧名>（与 eeFrames 同序）
@@ -329,6 +346,36 @@ namespace humanoidController_wheel_wbc
     // 块之后（无任何 in-flight rollout/getPolicy 的安全点）消费并发起调用。
     std::atomic<bool> mpc_pause_requested_{false};
     std::atomic<bool> mpc_resume_requested_{false};
+
+    // 里程计保护。对时会让底盘 /odom 时间戳和位姿跳变，robot_localization 发散后
+    // 基座跟踪代价会淹没手臂代价。异常锁存后不再向 MPC 发布观测，并暂停求解；
+    // 关节位置停在故障前最后一拍，速度和力矩清零。不自动恢复。
+    // error_code: 0 正常；31001 断流；31002 位姿/速度突变；31003 非有限值；31004 时间戳跳变。
+    bool odom_guard_enable_{true};
+    double odom_guard_timeout_sec_{0.30};
+    double odom_guard_stamp_backward_sec_{0.05};
+    double odom_guard_stamp_forward_sec_{0.50};
+    double odom_guard_max_linear_speed_{1.5};
+    double odom_guard_max_yaw_rate_{1.5};
+    double odom_guard_speed_margin_{3.0};
+    double odom_guard_min_pos_jump_m_{0.05};
+    double odom_guard_min_yaw_jump_rad_{0.15};
+    double odom_guard_max_sample_linear_speed_{3.0};
+    double odom_guard_max_sample_yaw_rate_{4.0};
+    double odom_guard_trusted_dt_sec_{0.20};
+    bool odom_fault_latched_{false};
+    bool odom_fault_announced_{false};
+    bool odom_mpc_paused_{false};
+    bool odom_fault_zero_vel_sent_{false};
+    uint32_t odom_fault_code_{0};
+    std::string odom_fault_detail_;
+    bool odom_guard_has_baseline_{false};
+    vector6_t odom_guard_last_{vector6_t::Zero()};
+    ros::Time odom_guard_last_stamp_;
+    std::chrono::steady_clock::time_point odom_guard_last_steady_{};
+    bool has_published_joint_cmd_{false};
+    kuavo_msgs::jointCmd last_published_joint_cmd_;
+    std::chrono::steady_clock::time_point odom_fault_zero_vel_steady_{};
 
     // 3791: 软暂停四状态机（新语义，disable 受理即发 enable=false，仅 IDLE 发 true）：
     //   IDLE     运行稳定。受理 disable → PAUSING

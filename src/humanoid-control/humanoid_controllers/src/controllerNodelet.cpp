@@ -114,7 +114,7 @@ private:
     humanoid_controller::HybridJointInterface *robot_hw;
     ros::Subscriber pause_sub;
 
-    humanoid_controller::humanoidController *controller_ptr_;
+    humanoid_controller::humanoidController *controller_ptr_{nullptr};
     humanoid_wheel_controller::humanoidWheelController *controller_wheel_ptr_;
     humanoidController_wheel_wbc::humanoidControllerWheelWbc *controller_wheel_real_ptr_;
     ros::Subscriber stop_sub_;
@@ -133,6 +133,10 @@ private:
 
         if (msg->data)
         {
+            if (controller_ptr_ != nullptr)
+            {
+                controller_ptr_->haltArmCmdStream();
+            }
             is_running = false;
             std::cerr << "[controllerNodelet] stopCallback setting is_running=false and entering controllerExit()" << std::endl;
             controllerExit();

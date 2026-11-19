@@ -1,6 +1,7 @@
 #pragma once
 
 #include <atomic>
+#include <cstdint>
 #include <memory>
 #include <map>
 #include <humanoid_interface/HumanoidInterface.h>
@@ -264,7 +265,11 @@ namespace humanoid_controller
     bool preUpdateComplete() {return isPreUpdateComplete;}
     void update(const ros::Time &time, const ros::Duration &period);
     void starting(const ros::Time &time);
-    void stopping(const ros::Time & /*time*/) { mpcRunning_ = false; }
+    void stopping(const ros::Time & /*time*/) { haltArmCmdStream(); mpcRunning_ = false; }
+    // 离开插补时撤销发送权，并把最后实际下发的 q/v 记入交接缓存。不锁存停机。
+    void disarmArmCmdStream();
+    // 安全停机：同一互斥区内锁存禁止发送，并作废已经开始的这一拍。在途帧不能自行解除。
+    void haltArmCmdStream();
 
     /**
      * @brief 等待下一个控制周期（用于控制频率管理）
@@ -441,6 +446,13 @@ namespace humanoid_controller
     bool enableArmTrajInterpCallback(std_srvs::SetBool::Request& req, std_srvs::SetBool::Response& res);
     bool applyArmTrajInterpolator(const ros::Time& time, double actual_dt, vector_t& qOut, vector_t& vOut);
     void resetArmTrajInterpolator();
+    void startArmCmdStream();
+    void stopArmCmdStream();
+    void armCmdStreamLoop();
+    void armCmdStreamSetActive(bool active);
+    void revokeArmCmdStreamLocked();
+    // 插补器在独立 2ms 线程里积分。WBC update() 只取最近一次输出，避免控制循环超时把关节指令一起卡住。
+    bool loadArmCmdStreamForWbc(const ros::Time& time, vector_t& qOut, vector_t& vOut);
     void seedArmCommandFiltersFromCurrentCmd();
     bool enableMmArmTrajectoryControlCallback(kuavo_msgs::changeArmCtrlMode::Request &req, kuavo_msgs::changeArmCtrlMode::Response &res);
     bool getMmArmCtrlCallback(kuavo_msgs::changeArmCtrlMode::Request &req, kuavo_msgs::changeArmCtrlMode::Response &res);
@@ -878,6 +890,19 @@ namespace humanoid_controller
     vector_t last_wbc_arm_cmd_q_;
     vector_t last_wbc_arm_cmd_v_;
     bool was_interpolator_path_{false};
+    std::thread arm_cmd_stream_thread_;
+    std::atomic_bool arm_cmd_stream_running_{false};
+    std::mutex arm_cmd_stream_mutex_;
+    bool arm_cmd_stream_active_{false};
+    bool arm_cmd_stream_base_valid_{false};
+    bool arm_cmd_stream_output_valid_{false};
+    // 安全停机锁存。只有 starting() 或重新进入 ultra-fast 才清除，在途 update 不能清。
+    bool arm_cmd_stream_halted_{false};
+    // 每次安全停机加一。update 开头记下的代次对不上时，这一拍不能再取得发送权。
+    uint64_t arm_cmd_stream_epoch_{0};
+    kuavo_msgs::jointCmd arm_cmd_stream_base_;
+    vector_t arm_cmd_stream_q_;
+    vector_t arm_cmd_stream_v_;
 
     double sensor_frequency_{1000.0};   // 传感器数据频率
     double sensor_dt_{0.001};           // 传感器数据采样周期，用于滤波器和数据缓冲区

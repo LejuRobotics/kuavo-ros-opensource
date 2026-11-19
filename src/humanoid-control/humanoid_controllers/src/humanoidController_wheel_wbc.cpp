@@ -14,12 +14,15 @@
 #include "humanoid_interface/common/TopicLogger.h"
 #include <iostream>
 #include <cmath>
+#include <cctype>
+#include <cstdio>
 #include <cstring>
 #include <fstream>
 #include <sstream>
 #include <iomanip>
 #include <algorithm>
 #include <chrono>
+#include <thread>
 #include <unistd.h>
 #include <pthread.h>
 #include <sched.h>
@@ -275,6 +278,31 @@ namespace humanoidController_wheel_wbc
       controllerNh_.getParam("/play_back", is_play_back_mode_);
       std::cout << "play_back: " << is_play_back_mode_ << std::endl;
     }
+    controllerNh_.param("/odom_guard/enable", odom_guard_enable_, true);
+    controllerNh_.param("/odom_guard/timeout_sec", odom_guard_timeout_sec_, 0.30);
+    controllerNh_.param("/odom_guard/stamp_backward_sec", odom_guard_stamp_backward_sec_, 0.05);
+    controllerNh_.param("/odom_guard/stamp_forward_sec", odom_guard_stamp_forward_sec_, 0.50);
+    controllerNh_.param("/odom_guard/max_linear_speed", odom_guard_max_linear_speed_, 1.5);
+    controllerNh_.param("/odom_guard/max_yaw_rate", odom_guard_max_yaw_rate_, 1.5);
+    controllerNh_.param("/odom_guard/speed_margin", odom_guard_speed_margin_, 3.0);
+    controllerNh_.param("/odom_guard/min_pos_jump_m", odom_guard_min_pos_jump_m_, 0.05);
+    controllerNh_.param("/odom_guard/min_yaw_jump_rad", odom_guard_min_yaw_jump_rad_, 0.15);
+    controllerNh_.param("/odom_guard/max_sample_linear_speed", odom_guard_max_sample_linear_speed_, 3.0);
+    controllerNh_.param("/odom_guard/max_sample_yaw_rate", odom_guard_max_sample_yaw_rate_, 4.0);
+    controllerNh_.param("/odom_guard/trusted_dt_sec", odom_guard_trusted_dt_sec_, 0.20);
+    odom_guard_timeout_sec_ = std::max(0.05, odom_guard_timeout_sec_);
+    odom_guard_stamp_forward_sec_ = std::max(odom_guard_timeout_sec_, odom_guard_stamp_forward_sec_);
+    odom_guard_max_linear_speed_ = std::max(0.1, odom_guard_max_linear_speed_);
+    odom_guard_max_yaw_rate_ = std::max(0.1, odom_guard_max_yaw_rate_);
+    odom_guard_speed_margin_ = std::max(1.0, odom_guard_speed_margin_);
+    odom_guard_min_pos_jump_m_ = std::max(0.01, odom_guard_min_pos_jump_m_);
+    odom_guard_min_yaw_jump_rad_ = std::max(0.02, odom_guard_min_yaw_jump_rad_);
+    odom_guard_trusted_dt_sec_ = std::max(0.02, odom_guard_trusted_dt_sec_);
+    ROS_INFO("[odom_guard] enable=%s timeout=%.2fs stamp_back=%.2fs stamp_fwd=%.2fs pos_jump>=%.3fm",
+             odom_guard_enable_ ? "true" : "false",
+             odom_guard_timeout_sec_, odom_guard_stamp_backward_sec_, odom_guard_stamp_forward_sec_,
+             odom_guard_min_pos_jump_m_);
+    warnIfHostNtpService();
     
     double controlFrequency = 500.0; // 500Hz
     controllerNh_.getParam("/wbc_frequency", controlFrequency);
@@ -566,6 +594,17 @@ namespace humanoidController_wheel_wbc
     waistYawKinematicPublisher_ = controllerNh_.advertise<nav_msgs::Odometry>("/waist_yaw_link_kinematic", 10);
     lbLegTrajPub_ = controllerNh_.advertise<sensor_msgs::JointState>("/lb_leg_traj", 10);
     stopRobotPub_ = controllerNh_.advertise<std_msgs::Bool>("/stop_robot", 10);
+    odomFaultCodePub_ = controllerNh_.advertise<std_msgs::UInt32>("/humanoid_wheel/error_code", 1, true);
+    odomFaultMsgPub_ = controllerNh_.advertise<std_msgs::String>("/humanoid_wheel/error_msg", 1, true);
+    {
+      std_msgs::UInt32 code_msg;
+      code_msg.data = 0;
+      odomFaultCodePub_.publish(code_msg);
+      std_msgs::String text_msg;
+      text_msg.data = "ok";
+      odomFaultMsgPub_.publish(text_msg);
+      controllerNh_.setParam("/humanoid_wheel/error_code", 0);
+    }
     armTrajFilteredPub_ = controllerNh_.advertise<sensor_msgs::JointState>("/vr_incremental/kuavo_arm_traj_filtered", 10);
     resetToStatePub_ = controllerNh_.advertise<std_msgs::Float64MultiArray>("/mobile_manipulator_reset_to_state", 1);
     torsoRotationLockSub_ = controllerNh_.subscribe<sensor_msgs::JointState>(
@@ -1148,10 +1187,16 @@ namespace humanoidController_wheel_wbc
         ROS_ERROR_THROTTLE(1.0, "[update] Failed to get sensor realtime data");
     }
     
-    // 从控制数据管理器获取里程计数据
-    vector6_t odomData_new;
-    auto bIsgetOdomData = control_data_manager_->getRealtimeOdomData(odomData_new);
-    if (!bIsgetOdomData) 
+    // 从控制数据管理器获取里程计数据。异常帧不能进入观测，否则基座代价会淹没手臂跟踪。
+    vector6_t odomData_new = vector6_t::Zero();
+    if (odom_guard_enable_)
+    {
+      if (guardOdomAndHold(time, bIsgetSensorData, sensors_data_new, odomData_new))
+      {
+        return;
+      }
+    }
+    else if (!control_data_manager_->getRealtimeOdomData(odomData_new))
     {
         ROS_WARN_THROTTLE(1.0, "[update] Failed to get odometry realtime data");
     }
@@ -1966,6 +2011,8 @@ namespace humanoidController_wheel_wbc
     }
 
     jointCmdPub_.publish(jointCmdMsg);
+    last_published_joint_cmd_ = jointCmdMsg;
+    has_published_joint_cmd_ = true;
 
     //更新共享内存中的关节命令
     control_data_manager_->publishJointCmdToShm(jointCmdMsg);
@@ -3804,6 +3851,316 @@ namespace humanoidController_wheel_wbc
       ros::Duration(0.1).sleep();
     }
     ROS_ERROR("[humanoidControllerWheelWbc] stop_robot messages published");
+  }
+
+  bool humanoidControllerWheelWbc::guardOdomAndHold(const ros::Time& time, bool sensor_ok,
+                                                    const SensorData& sensorData, vector6_t& odom_out)
+  {
+    if (odom_fault_latched_)
+    {
+      publishOdomFaultHold(time, sensor_ok, sensorData);
+      return true;
+    }
+
+    vector6_t odom = vector6_t::Zero();
+    ros::Time stamp;
+    double steady_age_sec = 1.0e9;
+    const bool seen = control_data_manager_->getLatestOdom(odom, stamp, steady_age_sec);
+
+    uint32_t code = 0;
+    std::string detail;
+    bool accepted = false;
+    if (assessOdomSample(seen, odom, stamp, steady_age_sec, code, detail, accepted))
+    {
+      latchOdomFault(code, detail);
+      publishOdomFaultHold(time, sensor_ok, sensorData);
+      if (enable_mpc_ && mrtRosInterface_ && !odom_mpc_paused_)
+      {
+        mrtRosInterface_->pauseResumeMpcNode(true);
+        odom_mpc_paused_ = true;
+      }
+      return true;
+    }
+
+    if (!accepted)
+    {
+      ROS_WARN_THROTTLE(1.0, "[odom_guard] 尚无可用里程计，本拍不送入 MPC");
+      odom_out.setZero();
+      return false;
+    }
+
+    odom_out = odom;
+    return false;
+  }
+
+  bool humanoidControllerWheelWbc::assessOdomSample(bool seen, const vector6_t& odom, const ros::Time& stamp,
+                                                    double steady_age_sec, uint32_t& code, std::string& detail,
+                                                    bool& accepted)
+  {
+    accepted = false;
+    std::ostringstream oss;
+    const bool fresh = seen && steady_age_sec <= odom_guard_timeout_sec_;
+    // 还没有一帧合格里程计时，断流只跳过本拍，避免启动阶段把 MPC 永久锁死。
+    if (!odom_guard_has_baseline_ && !fresh)
+    {
+      return false;
+    }
+
+    if (!fresh)
+    {
+      code = 31001;
+      oss << "断流 age=" << std::fixed << std::setprecision(3) << steady_age_sec << "s";
+      detail = oss.str();
+      return true;
+    }
+
+    if (!odom.allFinite())
+    {
+      code = 31003;
+      detail = "里程计含 NaN/Inf";
+      return true;
+    }
+
+    const double linear_speed = std::hypot(odom[3], odom[4]);
+    if (linear_speed > odom_guard_max_sample_linear_speed_ ||
+        std::abs(odom[5]) > odom_guard_max_sample_yaw_rate_)
+    {
+      code = 31002;
+      oss << "速度突变 vxy=" << linear_speed << " wz=" << odom[5];
+      detail = oss.str();
+      return true;
+    }
+
+    const auto now_steady = std::chrono::steady_clock::now();
+    if (!odom_guard_has_baseline_)
+    {
+      odom_guard_last_ = odom;
+      odom_guard_last_stamp_ = stamp;
+      odom_guard_last_steady_ = now_steady;
+      odom_guard_has_baseline_ = true;
+      accepted = true;
+      return false;
+    }
+
+    double sample_dt = std::chrono::duration<double>(now_steady - odom_guard_last_steady_).count();
+    if (!stamp.isZero() && !odom_guard_last_stamp_.isZero())
+    {
+      const double stamp_dt = (stamp - odom_guard_last_stamp_).toSec();
+      if (stamp_dt < -odom_guard_stamp_backward_sec_ || stamp_dt > odom_guard_stamp_forward_sec_)
+      {
+        code = 31004;
+        oss << "时间戳跳变 dt=" << stamp_dt << "s";
+        detail = oss.str();
+        return true;
+      }
+      // 同一帧被 500Hz 重复读到，或轻微乱序时，不要用 2ms 轮询间隔把正常位移折成超速。
+      sample_dt = stamp_dt > 1e-4 ? stamp_dt : std::max(sample_dt, 0.02);
+    }
+
+    const double trusted_dt = std::min(std::max(sample_dt, 0.0), odom_guard_trusted_dt_sec_);
+    const double pos_limit = std::max(odom_guard_min_pos_jump_m_,
+                                       odom_guard_speed_margin_ * odom_guard_max_linear_speed_ * trusted_dt);
+    const double yaw_limit = std::max(odom_guard_min_yaw_jump_rad_,
+                                       odom_guard_speed_margin_ * odom_guard_max_yaw_rate_ * trusted_dt);
+    const double dx = odom[0] - odom_guard_last_[0];
+    const double dy = odom[1] - odom_guard_last_[1];
+    const double dist = std::hypot(dx, dy);
+    const double dyaw = std::abs(angles::shortest_angular_distance(odom_guard_last_[2], odom[2]));
+    // 单拍位移低于绝对阈值时，仍用位移/时间戳间隔折算速度，抓住 10ms 内数厘米的跳变。
+    const bool implied_jump = sample_dt > 1e-3 &&
+                              (dist / sample_dt > odom_guard_max_sample_linear_speed_ ||
+                               dyaw / sample_dt > odom_guard_max_sample_yaw_rate_);
+    if (dist > pos_limit || dyaw > yaw_limit || implied_jump)
+    {
+      code = 31002;
+      oss << std::fixed << std::setprecision(3)
+          << "位姿突变 dist=" << dist << "m dyaw=" << dyaw
+          << "rad limit=" << pos_limit << "/" << yaw_limit
+          << " dt=" << sample_dt;
+      detail = oss.str();
+      return true;
+    }
+
+    odom_guard_last_ = odom;
+    odom_guard_last_stamp_ = stamp;
+    odom_guard_last_steady_ = now_steady;
+    accepted = true;
+    return false;
+  }
+
+  void humanoidControllerWheelWbc::latchOdomFault(uint32_t code, const std::string& detail)
+  {
+    odom_fault_latched_ = true;
+    odom_fault_code_ = code;
+    odom_fault_detail_ = detail;
+    mpc_policy_gate_open_.store(false);
+
+    // setParam 要等 ROS master 应答。故障首拍不能被这次通信挡住，镜像参数放到后台写。
+    ros::NodeHandle param_nh = controllerNh_;
+    const int code_param = static_cast<int>(code);
+    std::thread([param_nh, code_param]() mutable {
+      param_nh.setParam("/humanoid_wheel/error_code", code_param);
+    }).detach();
+
+    ROS_ERROR("[odom_guard] 里程计异常，停止 MPC 解算，机器人保持当前指令。error_code=%u %s",
+              code, detail.c_str());
+  }
+
+  bool humanoidControllerWheelWbc::buildHoldJointCmdFromSensor(const ros::Time& time, const SensorData& sensorData,
+                                                               kuavo_msgs::jointCmd& cmd) const
+  {
+    const int n = static_cast<int>(lowJointNum_ + armNum_ + headNum_);
+    if (n <= 0 || sensorData.jointPos_.size() < n)
+    {
+      return false;
+    }
+    const auto& max_current = kuavo_settings_.hardware_settings.max_current;
+    cmd = kuavo_msgs::jointCmd();
+    cmd.header.stamp = time;
+    cmd.joint_q.reserve(n);
+    cmd.joint_v.reserve(n);
+    cmd.tau.reserve(n);
+    cmd.tau_ratio.reserve(n);
+    cmd.tau_max.reserve(n);
+    cmd.control_modes.reserve(n);
+    cmd.joint_kp.reserve(n);
+    cmd.joint_kd.reserve(n);
+    for (int i = 0; i < n; ++i)
+    {
+      cmd.joint_q.push_back(sensorData.jointPos_[i]);
+      cmd.joint_v.push_back(0.0);
+      cmd.tau.push_back(0.0);
+      cmd.tau_ratio.push_back(1.0);
+      cmd.tau_max.push_back(i < static_cast<int>(max_current.size()) ? max_current[i] : 0.0);
+      cmd.control_modes.push_back(2);
+      cmd.joint_kp.push_back(0.0);
+      cmd.joint_kd.push_back(0.0);
+    }
+    return true;
+  }
+
+  void humanoidControllerWheelWbc::publishOdomFaultHold(const ros::Time& time, bool sensor_ok,
+                                                        const SensorData& sensorData)
+  {
+    if (!has_published_joint_cmd_ && sensor_ok)
+    {
+      kuavo_msgs::jointCmd hold_cmd;
+      if (buildHoldJointCmdFromSensor(time, sensorData, hold_cmd))
+      {
+        last_published_joint_cmd_ = hold_cmd;
+        has_published_joint_cmd_ = true;
+      }
+    }
+
+    if (has_published_joint_cmd_)
+    {
+      kuavo_msgs::jointCmd hold_cmd = last_published_joint_cmd_;
+      hold_cmd.header.stamp = time;
+      std::fill(hold_cmd.joint_v.begin(), hold_cmd.joint_v.end(), 0.0);
+      std::fill(hold_cmd.tau.begin(), hold_cmd.tau.end(), 0.0);
+      replaceDefaultEcMotorPdoGait(hold_cmd);
+      jointCmdPub_.publish(hold_cmd);
+      control_data_manager_->publishJointCmdToShm(hold_cmd);
+      last_published_joint_cmd_ = hold_cmd;
+    }
+    else
+    {
+      ROS_ERROR_THROTTLE(1.0, "[odom_guard] 没有可保持的关节指令");
+    }
+
+    const auto now_steady = std::chrono::steady_clock::now();
+    const double zero_period = 1.0 / std::max(1.0, base_cmd_vel_publish_rate_);
+    const bool due = !odom_fault_zero_vel_sent_ ||
+                     std::chrono::duration<double>(now_steady - odom_fault_zero_vel_steady_).count() >= zero_period;
+    if (due)
+    {
+      cmdVelPub_.publish(geometry_msgs::Twist());
+      odom_fault_zero_vel_steady_ = now_steady;
+      odom_fault_zero_vel_sent_ = true;
+      last_cmd_vel_pub_time_ = time;
+    }
+
+    std_msgs::UInt32 code_msg;
+    code_msg.data = odom_fault_code_;
+    odomFaultCodePub_.publish(code_msg);
+    std_msgs::String text_msg;
+    text_msg.data = odom_fault_detail_;
+    odomFaultMsgPub_.publish(text_msg);
+    if (ros_logger_)
+    {
+      ros_logger_->publishValue("/monitor/wheel/odom_fault_code", static_cast<double>(odom_fault_code_));
+    }
+
+    if (!odom_fault_announced_)
+    {
+      odom_fault_announced_ = true;
+    }
+    else
+    {
+      ROS_ERROR_THROTTLE(1.0, "[odom_guard] MPC 已停止，机器人保持。error_code=%u %s",
+                         odom_fault_code_, odom_fault_detail_.c_str());
+    }
+  }
+
+  namespace
+  {
+    std::string captureCommand(const char* cmd)
+    {
+      std::string output;
+      FILE* pipe = popen(cmd, "r");
+      if (pipe == nullptr)
+      {
+        return output;
+      }
+      char buf[256];
+      while (fgets(buf, sizeof(buf), pipe) != nullptr)
+      {
+        output += buf;
+      }
+      pclose(pipe);
+      return output;
+    }
+
+    std::string trimCopy(std::string text)
+    {
+      const auto not_space = [](unsigned char ch) { return std::isspace(ch) == 0; };
+      text.erase(text.begin(), std::find_if(text.begin(), text.end(), not_space));
+      text.erase(std::find_if(text.rbegin(), text.rend(), not_space).base(), text.end());
+      return text;
+    }
+  }
+
+  void humanoidControllerWheelWbc::warnIfHostNtpService()
+  {
+    // 只查控制器所在主机。底盘时钟跟随这台机器时，NTP 阶跃会先打到 robot_localization。
+    const char* cmd =
+        "timeout 2 bash -c '"
+        "timedatectl show -p NTP --value 2>/dev/null; echo ---; "
+        "for u in systemd-timesyncd.service chrony.service chronyd.service ntp.service ntpd.service; do "
+        "systemctl is-active --quiet \"$u\" && echo \"$u\"; "
+        "done'";
+    const std::string report = captureCommand(cmd);
+    const auto sep = report.find("---");
+    const std::string ntp = trimCopy(sep == std::string::npos ? report : report.substr(0, sep));
+    std::string units = trimCopy(sep == std::string::npos ? std::string() : report.substr(sep + 3));
+    std::replace(units.begin(), units.end(), '\n', ' ');
+    units = trimCopy(units);
+
+    if (ntp == "yes")
+    {
+      ROS_WARN("[ntp] 控制器所在主机的 NTP 服务已开启（timedatectl NTP=yes%s%s）。"
+               "底盘时间跟随机器人时，联网对时会让系统时间阶跃，robot_localization 里程计发散，"
+               "MPC 基座代价淹没手臂跟踪。请关闭 NTP，见 humanoid_controllers/docs/关闭NTP服务说明.md",
+               units.empty() ? "" : "，正在运行: ",
+               units.empty() ? "" : units.c_str());
+      return;
+    }
+    if (ntp == "no")
+    {
+      ROS_INFO("[ntp] 控制器所在主机的 NTP 服务未开启（timedatectl NTP=no）");
+      return;
+    }
+    ROS_WARN("[ntp] 无法确认 NTP 服务状态（timedatectl 无有效输出）。请在机器人上执行 timedatectl 查看 NTP service");
   }
 
 } // namespace humanoidController_wheel_wbc

@@ -253,6 +253,9 @@ void ControlDataManager::odomCallback(const nav_msgs::Odometry::ConstPtr& msg) {
         std::lock_guard<std::mutex> lock(motion_mutex_);
         odom_data_.update(odom);
         base_link_pose_.update(base_pose);
+        odom_header_stamp_ = msg->header.stamp;
+        odom_recv_steady_ = std::chrono::steady_clock::now();
+        odom_recv_seen_ = true;
     }
 }
 
@@ -813,6 +816,21 @@ bool ControlDataManager::getRealtimeOdomData(vector6_t& out) const {
     }
     out = odom_data_.data;
     return false;
+}
+
+bool ControlDataManager::getLatestOdom(vector6_t& out, ros::Time& header_stamp, double& steady_age_sec) const {
+    std::lock_guard<std::mutex> lock(motion_mutex_);
+    if (!odom_recv_seen_) {
+        out.setZero();
+        header_stamp = ros::Time(0);
+        steady_age_sec = 1.0e9;
+        return false;
+    }
+    out = odom_data_.data;
+    header_stamp = odom_header_stamp_;
+    steady_age_sec = std::chrono::duration<double>(
+        std::chrono::steady_clock::now() - odom_recv_steady_).count();
+    return true;
 }
 
 bool ControlDataManager::getRealtimeBaseLinkPose(vector_t& out) const {
