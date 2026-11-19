@@ -288,6 +288,8 @@ namespace humanoid_controller
     void applySensorDataRL(const SensorData &data);
     void updatakinematics(const SensorData &sensor_data, bool is_initialized_);
     void resetKinematicsEstimation();
+    // RL 期间暂停 /ekf_se 的预测，避免没有 imu/kinematic 输入时空转积 yaw。
+    void syncEkfFilterProcessing();
 
     // MPC-RL 插值系统函数
     void startMPCRLInterpolation(double current_time, const vector6_t& target_torso_pose, const vector_t& target_arm_pos);
@@ -802,7 +804,12 @@ namespace humanoid_controller
     SensorData sensor_data_headRL_;
     SensorData sensor_data_waist_;
     Eigen::Quaterniond robot_quat_state_update_;
-    bool align_fused_yaw_to_imu_{false};  // resetKinematicsEstimation 后第一帧用当前 IMU yaw
+    bool align_fused_yaw_to_imu_{false};  // reset 后用 IMU yaw，直到定位 yaw 与 IMU 接近
+    // 与 /ekf_se/toggle 对齐。进入 RL 暂停预测，回到 MPC 再恢复。
+    std::atomic<bool> ekf_filter_processing_on_{true};
+    std::atomic<bool> ekf_filter_processing_desired_{true};
+    std::atomic<bool> ekf_toggle_inflight_{false};
+    ros::Time ekf_toggle_last_attempt_;
     vector_t desire_head_pos_ = vector_t::Zero(2);
     // 头部 vel/delta 缓冲（rad/s, rad）；desire_head_pos_ 为唯一开环终点
     // vel: sticky + 0.3s 超时清零；delta: oneshot 用后即清

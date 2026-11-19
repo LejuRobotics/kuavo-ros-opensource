@@ -27,8 +27,7 @@ else()
 endif()
 
 ## Find catkin macros and libraries
-find_package(catkin REQUIRED
-        COMPONENTS
+set(_humanoid_controllers_catkin_deps
         roscpp
         controller_interface
         humanoid_common
@@ -51,6 +50,12 @@ find_package(catkin REQUIRED
         std_srvs
         leju_mobile_base_msgs
         )
+# aarch64 的 robot_localization 是空包，没有 ToggleFilterProcessing。
+if(NOT KUAVO_BUILD_FOR_AARCH64)
+    list(APPEND _humanoid_controllers_catkin_deps robot_localization)
+    add_definitions(-DHUMANOID_CONTROLLERS_HAS_EKF)
+endif()
+find_package(catkin REQUIRED COMPONENTS ${_humanoid_controllers_catkin_deps})
 if(KUAVO_BUILD_FOR_AARCH64)
     find_package(drake QUIET)
     find_package(OpenVINO QUIET)
