@@ -1553,7 +1553,10 @@ namespace humanoid_controller
       sitDownWbc_->setWaistNums(waistNum_);
       sitDownWbc_->loadTasksSetting(taskFile, verbose, is_real_);
 
-      sitControlManager_->setupRos(controllerNh_);
+      if (humanoid_controller::SitControlManager::robotSupportsSeatControl(
+              drake_interface_->getRobotVersion())) {
+        sitControlManager_->setupRos(controllerNh_);
+      }
       // 坐起身控制器：段0 执行；ROS 入口（seat_return / real_initial_start / done）留主类
       sitUp_ = std::make_unique<humanoid_controller::SitUpController>(controllerNh_, *sitControlManager_);
       sitUp_->setMrt(mrtRosInterface_.get());
