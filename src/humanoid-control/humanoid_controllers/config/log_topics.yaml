@@ -12,6 +12,7 @@ topics:
   - /kuavo_.*
   - /monitor/.*
   - /odom
+  - /odom/chassis_takeover_state
   - /estimation_odom
   - /waist_yaw_kinematic
   - /pose
