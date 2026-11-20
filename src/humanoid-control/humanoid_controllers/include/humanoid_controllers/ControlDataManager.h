@@ -114,6 +114,9 @@ public:
     
     // 里程计数据 [x, y, yaw, vx, vy, vyaw]
     bool getRealtimeOdomData(vector6_t& out) const;
+    // 最近一帧 /odom。steady_age_sec 用单调钟，系统对时不会把它算成断流或新鲜数据。
+    // 从未收到时返回 false，steady_age_sec 置为很大的数。
+    bool getLatestOdom(vector6_t& out, ros::Time& header_stamp, double& steady_age_sec) const;
     void setOdomReset(void) {is_odom_reset_ = true; }  // 设置里程计重置标志位
     
     // 基座位姿 [x, y, z, qw, qx, qy, qz]
@@ -300,6 +303,9 @@ private:
     // 2. 位置和速度命令（高优先级）
     mutable std::mutex motion_mutex_;
     TimestampedData<vector6_t> odom_data_;        // 里程计
+    ros::Time odom_header_stamp_;                 // /odom header.stamp，对时跳变检测用
+    std::chrono::steady_clock::time_point odom_recv_steady_{};  // 回调到达的单调钟
+    bool odom_recv_seen_{false};
     TimestampedData<vector_t> base_link_pose_;    // 基座位姿
     TimestampedData<geometry_msgs::Twist> cmd_vel_;  // 速度命令
 

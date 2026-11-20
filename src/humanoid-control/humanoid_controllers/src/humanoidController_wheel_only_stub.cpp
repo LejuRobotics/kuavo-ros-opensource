@@ -22,6 +22,10 @@ void humanoidController::starting(const ros::Time& /*time*/) {}
 
 void humanoidController::waitForNextCycle() {}
 
+void humanoidController::disarmArmCmdStream() {}
+
+void humanoidController::haltArmCmdStream() {}
+
 double humanoidController::getControlFrequency() const { return 500.0; }
 
 void humanoidController::setupStateEstimate(const std::string& /*taskFile*/, bool /*verbose*/,

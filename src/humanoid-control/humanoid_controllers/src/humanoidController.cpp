@@ -38,6 +38,7 @@
 #include <std_srvs/Trigger.h>
 #include <algorithm> 
 #include <angles/angles.h>
+#include <time.h>
 #include <humanoid_estimation/FromTopiceEstimate.h>
 #include <humanoid_estimation/LinearKalmanFilter.h>
 #ifdef KUAVO_CONTROL_LIB_FOUND
@@ -1058,6 +1059,7 @@ namespace humanoid_controller
       enableMmArmCtrlSrv_ = controllerNh_.advertiseService("/enable_mm_wbc_arm_trajectory_control", &humanoidController::enableMmArmTrajectoryControlCallback, this);
       getMmArmCtrlSrv_ = controllerNh_.advertiseService("/get_mm_wbc_arm_trajectory_control", &humanoidController::getMmArmCtrlCallback, this);
       jointCmdPub_ = controllerNh_.advertise<kuavo_msgs::jointCmd>("/joint_cmd", 10);
+      startArmCmdStream();
       // 延迟测量: 发布SHM收到的原始手臂轨迹 + 滤波后手臂轨迹
       armTrajReceivedPub_ = controllerNh_.advertise<sensor_msgs::JointState>("/vr_incremental/kuavo_arm_traj_shm", 10);
       armTrajFilteredPub_ = controllerNh_.advertise<sensor_msgs::JointState>("/vr_incremental/kuavo_arm_traj_filtered", 10);
@@ -2680,6 +2682,7 @@ void humanoidController::sensorsDataCallback(const kuavo_msgs::sensorsData::Cons
       // 在 WBC 插补路径下降沿完成（MPC desired 往往比这个服务更早离开 EXTERN）。
       if (!want_ultra_fast && last_ultra_fast_mode_)
       {
+        disarmArmCmdStream();
         seedArmCommandFiltersFromCurrentCmd();
       }
 
@@ -2689,6 +2692,10 @@ void humanoidController::sensorsDataCallback(const kuavo_msgs::sensorsData::Cons
       ultra_fast_mode_ = req.control_mode;
       if(want_ultra_fast)
       {
+        {
+          std::lock_guard<std::mutex> lock(arm_cmd_stream_mutex_);
+          arm_cmd_stream_halted_ = false;
+        }
         last_ultra_fast_mode_ = true;
         last_wbc_arm_cmd_q_.resize(0);
         last_wbc_arm_cmd_v_.resize(0);
@@ -2768,6 +2775,10 @@ void humanoidController::sensorsDataCallback(const kuavo_msgs::sensorsData::Cons
   }
   void humanoidController::starting(const ros::Time &time)
   {
+    {
+      std::lock_guard<std::mutex> lock(arm_cmd_stream_mutex_);
+      arm_cmd_stream_halted_ = false;
+    }
     // Initial state
     // set the initial state = {0, 0, 0, 0, 0, 0, 0, 0, 0.976, 0, 0, 0, 0, 0, 0.35, -0.90, -0.55, 0, 0, 0, 0.35, -0.90, -0.55, 0}
     // currentObservation_.state = vector_t::Zero(HumanoidInterface_->getCentroidalModelInfo().stateDim);
@@ -3562,8 +3573,14 @@ void humanoidController::fillHeadJointCmd(kuavo_msgs::jointCmd& msg, int head_st
       {
         current_arm_q = arm_joint_trajectory_.pos;
       }
-      armTrajectoryInterpolator_.reset(current_arm_q, ros::Time::now());
-      arm_traj_interp_prev_q_ = current_arm_q;
+      {
+        std::lock_guard<std::mutex> lock(arm_cmd_stream_mutex_);
+        armTrajectoryInterpolator_.reset(current_arm_q, ros::Time::now());
+        arm_traj_interp_prev_q_ = current_arm_q;
+        arm_cmd_stream_output_valid_ = false;
+        arm_cmd_stream_active_ = false;
+        arm_cmd_stream_base_valid_ = false;
+      }
     }
     else
     {
@@ -3577,6 +3594,10 @@ void humanoidController::fillHeadJointCmd(kuavo_msgs::jointCmd& msg, int head_st
 
   void humanoidController::resetArmTrajInterpolator()
   {
+    std::lock_guard<std::mutex> lock(arm_cmd_stream_mutex_);
+    arm_cmd_stream_active_ = false;
+    arm_cmd_stream_base_valid_ = false;
+    arm_cmd_stream_output_valid_ = false;
     if (arm_traj_interp_prev_q_.size() > 0)
     {
       armTrajectoryInterpolator_.reset(arm_traj_interp_prev_q_, ros::Time::now());
@@ -3696,6 +3717,142 @@ void humanoidController::fillHeadJointCmd(kuavo_msgs::jointCmd& msg, int head_st
     return true;
   }
 
+  void humanoidController::startArmCmdStream()
+  {
+    if (arm_cmd_stream_thread_.joinable())
+    {
+      return;
+    }
+    arm_cmd_stream_running_.store(true);
+    arm_cmd_stream_thread_ = std::thread(&humanoidController::armCmdStreamLoop, this);
+  }
+
+  void humanoidController::stopArmCmdStream()
+  {
+    arm_cmd_stream_running_.store(false);
+    if (arm_cmd_stream_thread_.joinable())
+    {
+      arm_cmd_stream_thread_.join();
+    }
+  }
+
+  void humanoidController::armCmdStreamSetActive(bool active)
+  {
+    std::lock_guard<std::mutex> lock(arm_cmd_stream_mutex_);
+    arm_cmd_stream_active_ = active;
+    if (!active)
+    {
+      arm_cmd_stream_base_valid_ = false;
+    }
+  }
+
+  void humanoidController::revokeArmCmdStreamLocked()
+  {
+    arm_cmd_stream_active_ = false;
+    arm_cmd_stream_base_valid_ = false;
+    const int n = static_cast<int>(armNumReal_);
+    if (n > 0 && arm_cmd_stream_output_valid_ &&
+        arm_cmd_stream_q_.size() == n && arm_cmd_stream_v_.size() == n)
+    {
+      last_wbc_arm_cmd_q_ = arm_cmd_stream_q_;
+      last_wbc_arm_cmd_v_ = arm_cmd_stream_v_;
+    }
+  }
+
+  void humanoidController::disarmArmCmdStream()
+  {
+    std::lock_guard<std::mutex> lock(arm_cmd_stream_mutex_);
+    revokeArmCmdStreamLocked();
+  }
+
+  void humanoidController::haltArmCmdStream()
+  {
+    std::lock_guard<std::mutex> lock(arm_cmd_stream_mutex_);
+    revokeArmCmdStreamLocked();
+    arm_cmd_stream_halted_ = true;
+    ++arm_cmd_stream_epoch_;
+  }
+
+  bool humanoidController::loadArmCmdStreamForWbc(const ros::Time& time, vector_t& qOut, vector_t& vOut)
+  {
+    std::lock_guard<std::mutex> lock(arm_cmd_stream_mutex_);
+    if (arm_cmd_stream_output_valid_ && arm_cmd_stream_q_.size() == armNumReal_ &&
+        arm_cmd_stream_v_.size() == armNumReal_)
+    {
+      qOut = arm_cmd_stream_q_;
+      vOut = arm_cmd_stream_v_;
+      return true;
+    }
+    if (!applyArmTrajInterpolator(time, dt_, qOut, vOut))
+    {
+      return false;
+    }
+    arm_cmd_stream_q_ = qOut;
+    arm_cmd_stream_v_ = vOut;
+    arm_cmd_stream_output_valid_ = true;
+    return true;
+  }
+
+  void humanoidController::armCmdStreamLoop()
+  {
+    const double period = (dt_ > 1e-4 && dt_ < 0.05) ? dt_ : 0.002;
+    const long period_nsec = static_cast<long>(period * 1e9);
+    struct timespec next {};
+    clock_gettime(CLOCK_MONOTONIC, &next);
+    while (arm_cmd_stream_running_.load())
+    {
+      next.tv_nsec += period_nsec;
+      while (next.tv_nsec >= 1000000000L)
+      {
+        next.tv_sec += 1;
+        next.tv_nsec -= 1000000000L;
+      }
+      struct timespec now {};
+      clock_gettime(CLOCK_MONOTONIC, &now);
+      const double lag = static_cast<double>(now.tv_sec - next.tv_sec) +
+                          static_cast<double>(now.tv_nsec - next.tv_nsec) * 1e-9;
+      if (lag > 2.0 * period)
+      {
+        next = now;
+      }
+      else if (lag < 0.0)
+      {
+        clock_nanosleep(CLOCK_MONOTONIC, TIMER_ABSTIME, &next, nullptr);
+      }
+
+      std::lock_guard<std::mutex> lock(arm_cmd_stream_mutex_);
+      if (!arm_cmd_stream_running_.load() || arm_cmd_stream_halted_ ||
+          !arm_cmd_stream_active_ || !arm_cmd_stream_base_valid_)
+      {
+        continue;
+      }
+      vector_t q;
+      vector_t v;
+      if (!applyArmTrajInterpolator(ros::Time::now(), period, q, v))
+      {
+        continue;
+      }
+      const int arm_begin = jointNumReal_ + static_cast<int>(waistNum_);
+      if (armNumReal_ <= 0 || q.size() != armNumReal_ || v.size() != armNumReal_ || arm_begin < 0 ||
+          arm_cmd_stream_base_.joint_q.size() < static_cast<size_t>(arm_begin + armNumReal_) ||
+          arm_cmd_stream_base_.joint_v.size() < static_cast<size_t>(arm_begin + armNumReal_))
+      {
+        continue;
+      }
+      kuavo_msgs::jointCmd cmd = arm_cmd_stream_base_;
+      for (int i = 0; i < armNumReal_; ++i)
+      {
+        cmd.joint_q[arm_begin + i] = q(i);
+        cmd.joint_v[arm_begin + i] = v(i);
+      }
+      cmd.header.stamp = ros::Time::now();
+      arm_cmd_stream_q_ = q;
+      arm_cmd_stream_v_ = v;
+      arm_cmd_stream_output_valid_ = true;
+      publishControlCommands(cmd);
+    }
+  }
+
   void humanoidController::update(const ros::Time &time, const ros::Duration &dfd)
   {
     // 正常：仅看 isPreUpdateComplete。座椅段0：SitUp 专属 ownsPreUpdate，与开机蹲起路径隔离。
@@ -3707,6 +3864,11 @@ void humanoidController::fillHeadJointCmd(kuavo_msgs::jointCmd& msg, int head_st
       return;
     }
     wbc_ran_this_frame_ = false;  // 本帧复位，endTimer 时置位
+    uint64_t arm_cmd_frame_epoch = 0;
+    {
+      std::lock_guard<std::mutex> lock(arm_cmd_stream_mutex_);
+      arm_cmd_frame_epoch = arm_cmd_stream_epoch_;
+    }
     // 使用共享内存更新传感器数据
     if (use_shm_communication_) {
       updateSensorDataFromShm();
@@ -3984,6 +4146,7 @@ void humanoidController::fillHeadJointCmd(kuavo_msgs::jointCmd& msg, int head_st
 
     kuavo_msgs::jointCmd jointCmdMsg;
     jointCmdMsg.header.stamp = time;
+    bool publish_arm_from_stream = false;
     
     mrtRosInterface_->setCurrentObservation(currentObservation_);
 
@@ -4022,6 +4185,7 @@ void humanoidController::fillHeadJointCmd(kuavo_msgs::jointCmd& msg, int head_st
         if (!safetyChecker_->check(currentObservation_, vector_t::Zero(currentObservation_.state.size()), vector_t::Zero(currentObservation_.input.size())))
         {
           ROS_ERROR_STREAM("[humanoid Controller] Safety check failed!");
+          haltArmCmdStream();
           fall_down_state_ = FallStandState::FALL_DOWN;
           
           // 检查控制器列表是否存在倒地起身控制器，自动切换过去
@@ -4346,6 +4510,11 @@ void humanoidController::fillHeadJointCmd(kuavo_msgs::jointCmd& msg, int head_st
           ultra_fast_mode_ == kuavo_msgs::changeArmCtrlMode::Request::ik_ultra_fast_mode;
       // 只在插补路径下降沿交接：1→2 等待 EXTERN 时 interpolator_path 也是 false，
       // 若在那里 seed/hold 会把上一轮 mode2 的指令灌进 joint_cmd。
+      if (!interpolator_path)
+      {
+        // 停掉独立指令流，并把最后实际下发的 q/v 记下来再交接，避免用 WBC 旧快照把手臂拉回去。
+        disarmArmCmdStream();
+      }
       const bool hold_last_interp_cmd =
           was_interpolator_path_ && !interpolator_path &&
           last_wbc_arm_cmd_q_.size() == armNumReal_;
@@ -4374,14 +4543,15 @@ void humanoidController::fillHeadJointCmd(kuavo_msgs::jointCmd& msg, int head_st
         {
           if(ultra_fast_mode_ == kuavo_msgs::changeArmCtrlMode::Request::ik_ultra_fast_mode)
           {
-            // 增量 ultra-fast：q/v 都走插补器（与轮臂 applyArmTrajectoryInterpolation 一致）。
+            // 增量 ultra-fast：q/v 都走插补器。积分在 2ms 指令线程里进行，这里只取最近一次输出。
             vector_t interp_q;
             vector_t interp_v;
             if (enable_arm_traj_interpolator_ &&
-                applyArmTrajInterpolator(time, dfd.toSec(), interp_q, interp_v))
+                loadArmCmdStreamForWbc(time, interp_q, interp_v))
             {
               optimizedState2WBC_mrt_.tail(armNumReal_) = interp_q;
               optimizedInput2WBC_mrt_.tail(armNumReal_) = interp_v;
+              publish_arm_from_stream = true;
             }
             else
             {
@@ -4668,6 +4838,7 @@ void humanoidController::fillHeadJointCmd(kuavo_msgs::jointCmd& msg, int head_st
           if (!safetyChecker_->check(currentObservation_, optimizedState_mrt, optimizedInput_mrt))
           {
             ROS_ERROR_STREAM("[humanoid Controller] Safety check failed!");
+            haltArmCmdStream();
             fall_down_state_ = FallStandState::FALL_DOWN;
 
             if (controller_manager_ && has_fall_stand_controller_)
@@ -4864,6 +5035,7 @@ void humanoidController::fillHeadJointCmd(kuavo_msgs::jointCmd& msg, int head_st
         if (sitControlManager_->checkAnkleStall(ankle_torques)) {
           ROS_ERROR("[humanoidController] SEAT ANKLE STALL DETECTED (%.1f/%.1f/%.1f/%.1f N·m) — emergency stop!",
                     ankle_torques(0), ankle_torques(1), ankle_torques(2), ankle_torques(3));
+          haltArmCmdStream();
           std_msgs::Bool stop_msg;
           stop_msg.data = true;
           stop_pub_.publish(stop_msg);
@@ -5142,6 +5314,8 @@ void humanoidController::fillHeadJointCmd(kuavo_msgs::jointCmd& msg, int head_st
     if (transport_handoff_to_fallstand_.load())
     {
       transport_handoff_to_fallstand_ = false;
+      haltArmCmdStream();
+      publish_arm_from_stream = false;
       bool handoff_ok = false;
       if (has_fall_stand_controller_)
       {
@@ -5202,7 +5376,40 @@ void humanoidController::fillHeadJointCmd(kuavo_msgs::jointCmd& msg, int head_st
         ros_logger_->publishValue("/vr_incremental/wbc_processing_latency_ms", wbcProcessingLatencyMs);
       }
     }
-    publishControlCommands(jointCmdMsg);
+    {
+      std::lock_guard<std::mutex> lock(arm_cmd_stream_mutex_);
+      const bool frame_revoked = arm_cmd_stream_epoch_ != arm_cmd_frame_epoch;
+      if (frame_revoked || arm_cmd_stream_halted_)
+      {
+        arm_cmd_stream_active_ = false;
+        arm_cmd_stream_base_valid_ = false;
+      }
+      if (frame_revoked)
+      {
+        // 安全停机已经作废这一拍。不能在这里重新打开 2ms 指令流，也不能再发这一拍。
+      }
+      else if (publish_arm_from_stream && !arm_cmd_stream_halted_)
+      {
+        const bool stream_already = arm_cmd_stream_active_ && arm_cmd_stream_base_valid_;
+        arm_cmd_stream_base_ = jointCmdMsg;
+        arm_cmd_stream_base_valid_ = !jointCmdMsg.joint_q.empty();
+        const bool still_ultra_fast =
+            static_cast<bool>(use_ros_arm_joint_trajectory_) &&
+            ultra_fast_mode_ == kuavo_msgs::changeArmCtrlMode::Request::ik_ultra_fast_mode;
+        arm_cmd_stream_active_ = arm_cmd_stream_base_valid_ && still_ultra_fast;
+        // 指令流已经在发时，本拍不再发，避免和 2ms 线程各写一次 SHM。
+        if (!stream_already && still_ultra_fast)
+        {
+          publishControlCommands(jointCmdMsg);
+        }
+      }
+      else
+      {
+        arm_cmd_stream_active_ = false;
+        arm_cmd_stream_base_valid_ = false;
+        publishControlCommands(jointCmdMsg);
+      }
+    }
     {
       robotVisualizer_->updateSimplifiedArmPositions(simplifiedJointPos_);
       if (is_rl_controller_ || resetting_mpc_state_ != ResettingMpcState::NORMAL)
@@ -5451,6 +5658,7 @@ void humanoidController::fillHeadJointCmd(kuavo_msgs::jointCmd& msg, int head_st
         if (!has_fall_stand_controller_)
         {
           ROS_WARN_STREAM("Pull up protection triggered - publishing stop_robot message");
+          haltArmCmdStream();
           // 发布stop_robot话题
           ROS_ERROR_STREAM("[stop_robot_debug] publishing /stop_robot from pull-up protection branch, observation_time=" << currentObservation_.time); //waao
           std_msgs::Bool stop_msg;
@@ -5459,6 +5667,7 @@ void humanoidController::fillHeadJointCmd(kuavo_msgs::jointCmd& msg, int head_st
           ROS_WARN_STREAM("stop_robot message published");
         }else {
           // 检查控制器列表是否存在倒地起身控制器，自动切换过去
+          haltArmCmdStream();
           ROS_WARN_STREAM("Pull up detected, switch to fall down controller");
           controller_manager_->switchController(RLControllerType::FALL_STAND_CONTROLLER);
           current_controller_ptr_ = controller_manager_->getCurrentController();
@@ -5576,6 +5785,7 @@ void humanoidController::fillHeadJointCmd(kuavo_msgs::jointCmd& msg, int head_st
 
   humanoidController::~humanoidController()
   {
+    stopArmCmdStream();
     controllerRunning_ = false;
     if (mpcThread_.joinable())
     {
