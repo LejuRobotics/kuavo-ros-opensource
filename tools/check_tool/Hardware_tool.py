@@ -1543,7 +1543,7 @@ def secondary_menu():
                     version_num = int(robot_version)
                     rv = RobotVersion.create(version_num)
 
-                    if version_num == 62 or version_num == 63:
+                    if version_num in (62, 63, 410062, 410063):
                         # 检查是开源仓库还是闭源仓库
                         # 开源仓库：installed/lib/hardware_node/hardware_plant_wheel_arm_test
                         # 闭源仓库：devel/lib/hardware_node/hardware_plant_wheel_arm_test
@@ -1621,7 +1621,7 @@ def secondary_menu():
                     print(bcolors.OKGREEN + f"\n使用{script_description}" + bcolors.ENDC)
                     
                     # 询问用户是否已校准零点并位于零点位置（仅单关节测试需要）
-                    if version_num is not None and (version_num == 62 or version_num == 63) and is_single_joint_test:
+                    if version_num is not None and (version_num in (62, 63, 410062, 410063)) and is_single_joint_test:
                         print(bcolors.FAIL + "\n⚠ 请确认轮臂机器人已校准零点，且当前位于零点位置" + bcolors.ENDC)
                         user_confirm = input("确认无误后按回车继续，或输入 'q' 取消: ").strip()
                         
@@ -1638,7 +1638,7 @@ def secondary_menu():
                     else:
                         # Python脚本：使用python3执行
                         # 对于整机磨线测试，需要先source devel/setup.bash
-                        if version_num is not None and (version_num == 62 or version_num == 63) and "cmd_arm_leg_joint_test.py" in kuavo_breakin_script:
+                        if version_num is not None and (version_num in (62, 63, 410062, 410063)) and "cmd_arm_leg_joint_test.py" in kuavo_breakin_script:
                             script_dir = os.path.dirname(kuavo_breakin_script)
                             command = f"cd {workspace_root} && source devel/setup.bash && cd {script_dir} && python3 cmd_arm_leg_joint_test.py"
                             subprocess.run(command, shell=True, executable='/bin/bash')
