@@ -945,6 +945,10 @@ class ArmTrajectoryBezierDemo:
     def ensure_tact_playback_controller(self, timeout=3.0):
         if self.kuavo_control_scheme != "multi":
             return True
+        # 轮臂不提供 /humanoid_controller/get_controller_list，与前置门禁一致，
+        # 沿用既有 OCS2 动作路径，避免 current_controller 为 None 时空等超时。
+        if self.is_wheeled:
+            return True
 
         target_controller = "amp_controller"
         deadline = time.monotonic() + timeout
