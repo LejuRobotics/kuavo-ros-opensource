@@ -5,13 +5,13 @@ import rospy
 from sensor_msgs.msg import Joy
 from h12pro_controller_node.msg import h12proRemoteControllerChannel
 try:
-    from robot_version import RobotVersion
+    from robot_version import is_wheel_arm_version
 except ImportError:
     import rospkg
     rospack = rospkg.RosPack()
     import sys
     sys.path.insert(0, os.path.join(rospack.get_path('kuavo_common'), 'python'))
-    from robot_version import RobotVersion
+    from robot_version import is_wheel_arm_version
 
 H12_AXIS_RANGE_MAX = 1722
 H12_AXIS_RANGE_MIN = 282
@@ -88,10 +88,10 @@ class ChannelMapping:
 
 class H12ToJoyControllerNode:
     def __init__(self, *args, **kwargs) -> None:
-        # 判断是否为轮臂机器人(6代: major=6)
+        # 轮臂: major=6，以及 410062/410063（编码后 major 不再是 6）
         robot_version = os.environ.get('ROBOT_VERSION', '0')
         try:
-            self.is_wheel = RobotVersion.create(int(robot_version)).start_with(major=6)
+            self.is_wheel = is_wheel_arm_version(robot_version)
         except (ValueError, TypeError):
             self.is_wheel = False
 

@@ -743,6 +743,7 @@ class IkRos:
         self._sg100_debounce = False
         self._sg100_confirm_sec = 0.3
         self._sg100_step_warn_time = 0.0
+        self._sg100_frozen_trigger = (0.0, 0.0)
         wheel_absolute = self.robot_type == 1 or bool(rospy.get_param("/wheel_ik", False))
         if self.end_effector_type == HEIMAN and wheel_absolute:
             try:
@@ -759,11 +760,11 @@ class IkRos:
                     "/sg100/trigger", Float32MultiArray, queue_size=10
                 )
                 self._sg100_step = rospy.ServiceProxy(
-                    "/sg100/step_gesture", SG100StepGesture
+                    "/sg100/vr_step_gesture", SG100StepGesture
                 )
                 rospy.loginfo(
                     "[IkRos] wheel absolute heiman: publishing /sg100/trigger, "
-                    "stepping via /sg100/step_gesture (X+A next, X+B prev, hold 300ms)"
+                    "stepping via /sg100/vr_step_gesture (X+A next, X+B prev, hold 300ms)"
                 )
 
         # All callback-visible state must be initialized before subscriptions
@@ -2966,16 +2967,39 @@ class IkRos:
 
 
     def _publish_sg100_from_joystick(self, joy):
-        """轮臂绝对式黑漫：扳机 0~1 发到 /sg100/trigger，摸 X+A / X+B 满 300ms 切手势。"""
+        """轮臂绝对式黑漫：扳机 0~1 发到 /sg100/trigger，摸 X+A / X+B 满 300ms 切手势。
+
+        按下左手 Y 锁定当前姿势：扳机和切手势都不再响应，再按一次解除。
+        锁定期间仍发布按下瞬间的扳机值，避免断流后手势桥松手。
+        """
         if joy is None or self._sg100_trigger_pub is None:
             return
+        y_pressed = bool(joy.left_second_button_pressed)
+        if y_pressed and not self.__button_y_last:
+            self.__freeze_finger = not self.__freeze_finger
+            self._sg100_pending_dir = 0
+            self._sg100_debounce = False
+            if self.__freeze_finger:
+                self._sg100_frozen_trigger = (
+                    max(0.0, min(1.0, float(joy.left_trigger))),
+                    max(0.0, min(1.0, float(joy.right_trigger))),
+                )
+            print(
+                "\033[91mButton Y is pressed. SG100 finger lock: "
+                f"{'ON' if self.__freeze_finger else 'OFF'}\033[0m"
+            )
+        self.__button_y_last = y_pressed
+
+        if self.__freeze_finger:
+            left_trigger, right_trigger = self._sg100_frozen_trigger
+        else:
+            left_trigger = max(0.0, min(1.0, float(joy.left_trigger)))
+            right_trigger = max(0.0, min(1.0, float(joy.right_trigger)))
         trigger = Float32MultiArray()
-        trigger.data = [
-            max(0.0, min(1.0, float(joy.left_trigger))),
-            max(0.0, min(1.0, float(joy.right_trigger))),
-        ]
+        trigger.data = [left_trigger, right_trigger]
         self._sg100_trigger_pub.publish(trigger)
-        self._check_sg100_gesture_switch(joy)
+        if not self.__freeze_finger:
+            self._check_sg100_gesture_switch(joy)
 
     def _check_sg100_gesture_switch(self, joy):
         now = time.time()
@@ -3011,13 +3035,13 @@ class IkRos:
             res = self._sg100_step(direction, 2)
         except rospy.ServiceException as exc:
             if now - self._sg100_step_warn_time >= 2.0:
-                rospy.logwarn("[IkRos] step_gesture failed: %s", exc)
+                rospy.logwarn("[IkRos] vr_step_gesture failed: %s", exc)
                 self._sg100_step_warn_time = now
             self._sg100_pending_dir = 0
             return
         if not res.success:
             if now - self._sg100_step_warn_time >= 2.0:
-                rospy.logwarn("[IkRos] step_gesture failed: %s", res.message)
+                rospy.logwarn("[IkRos] vr_step_gesture failed: %s", res.message)
                 self._sg100_step_warn_time = now
             self._sg100_pending_dir = 0
             return

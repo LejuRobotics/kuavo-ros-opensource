@@ -5,9 +5,10 @@
 //
 // 关键约束：
 //   - 该节点不参与 chest 跟踪（无 chest 4 关节）、不发 cmd_vel；
-//   - major=6 时本节点在加载 kuavo.json 后注入 arm_only_urdf（写死 s63 的
-//     14 DOF 纯双臂 URDF，上半身各版本硬件一致），Quest3IkIncrementalROS
-//     优先读该字段，fallback 才走 arm_urdf；
+//   - 轮臂版本在加载 kuavo.json 后注入 arm_only_urdf（14 DOF 纯双臂 URDF，
+//     上半身各版本硬件一致），Quest3IkIncrementalROS 优先读该字段，
+//     fallback 才走 arm_urdf。410062/410063 以及 210062/310062 编码后
+//     major 不再是 6，仍要走这条注入；
 //   - chest / 底盘控制由 5W 平台原生方案（lb_ctrl_api → MPC）负责。
 #include <ros/package.h>
 #include <ros/ros.h>
@@ -24,6 +25,7 @@
 #include "motion_capture_ik/Quest3IkIncrementalROS.h"
 #include "motion_capture_ik/json.hpp"
 #include "leju_utils/define.hpp"
+#include "kuavo_common/common/common.h"
 
 // 5W 轮式底盘 cmd_vel 转发器：v52 IK 类不发 cmd_vel（v52 平台无底盘），
 // 但 v62 5W 平台需要把摇杆映射到底盘速度。这里独立做这件事，跟 IK 解耦。
@@ -81,6 +83,17 @@ class ChassisCmdVelForwarder {
   double linearYLimit_ = 0.4;
   double angularZLimit_ = 0.25;
 };
+
+// 60–69 以及带 patch 后 major 仍为 6 的版本走 major==6。
+// 210062/310062/410062/410063 进位后 major 变成 1006，version_number 仍是原编号。
+bool isWheelArmVersion(int version) {
+  if (!RobotVersion::is_valid(version)) {
+    return false;
+  }
+  const RobotVersion robotVersion = RobotVersion::create(version);
+  const uint32_t id = robotVersion.version_number();
+  return robotVersion.major() == 6 || id == 210062 || id == 310062 || id == 410062 || id == 410063;
+}
 
 int getRobotVersion(ros::NodeHandle& nodeHandle) {
   while (!nodeHandle.hasParam("/robot_version") && ros::ok()) {
@@ -153,10 +166,14 @@ int main(int argc, char** argv) {
   nlohmann::json jsonData;
   loadJsonConfig(jsonData, modelConfigFile);
 
-  // 轮臂 (major=6) 上半身硬件一致，半身 IK 统一使用 models/wheel_arm_upper_body/urdf/drake/wheel_v3_arm_only.urdf，
-  // 不依赖各版本 kuavo.json 的 arm_only_urdf 字段（该字段仅本节点消费，已移除）。
-  if (robotVersionInt / 10 == 6) {
+  // 轮臂上半身硬件一致，半身 IK 统一使用 14 自由度模型。
+  // 不能用 robotVersionInt/10==6：410062 得到 41006，会退回 18 自由度的 arm_urdf。
+  if (isWheelArmVersion(robotVersionInt)) {
     jsonData["arm_only_urdf"] = "wheel_arm_upper_body/urdf/drake/wheel_v3_arm_only.urdf";
+    ROS_INFO("[wheel_arm_only_ik] robot_version=%d uses wheel_v3_arm_only.urdf", robotVersionInt);
+  } else {
+    ROS_WARN("[wheel_arm_only_ik] robot_version=%d is not a wheel-arm version, arm_only_urdf is not injected",
+             robotVersionInt);
   }
 
   // ChassisCmdVelForwarder 的 subscriber 用默认 callback queue，

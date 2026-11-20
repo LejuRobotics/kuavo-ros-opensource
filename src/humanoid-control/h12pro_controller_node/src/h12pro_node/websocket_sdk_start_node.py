@@ -14,7 +14,7 @@ from geometry_msgs.msg import Twist
 
 rospack = rospkg.RosPack()
 sys.path.insert(0, os.path.join(rospack.get_path('kuavo_common'), 'python'))
-from robot_version import RobotVersion
+from robot_version import is_wheel_arm_version
 
 ROS_MASTER_URI = os.getenv("ROS_MASTER_URI")
 ROS_IP = os.getenv("ROS_IP")
@@ -230,9 +230,9 @@ class KuavoRobotSim(KuavoRobot):
             ROS_IP = "localhost"
             ROS_HOSTNAME = "localhost"
 
-        # 根据 ROBOT_VERSION 选择 launch 文件（使用 RobotVersion 判断，与 ocs2_h12pro_node 一致）
+        # 根据 ROBOT_VERSION 选择 launch 文件（与 ocs2_h12pro_node 的轮臂判断一致）
         robot_version_int = int(ROBOT_VERSION) if ROBOT_VERSION else 40
-        is_wheel_arm = RobotVersion.create(robot_version_int).start_with(major=6)
+        is_wheel_arm = is_wheel_arm_version(robot_version_int)
         launch_file = "load_kuavo_mujoco_sim_wheel.launch" if is_wheel_arm else "load_kuavo_mujoco_sim.launch"
         launch_cmd = f"roslaunch humanoid_controllers {launch_file} && export DISPLAY=:1"
         return tmux_run_cmd(WEBSOCKET_HUMANOID_ROBOT_SESSION_NAME, launch_cmd, sudo=False)

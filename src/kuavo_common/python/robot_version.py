@@ -232,6 +232,22 @@ def _coerce_robot_version(version):
     return RobotVersion.create(version_number)
 
 
+# 410062/410063 的 PPPPMMMMN 把 patch=4 进位后 major 变成 1006，
+# start_with(major=6) 为假，但它们仍是 kuavo5w（黑漫 SG100 V4 轮臂）。
+# 与 MobileManipulatorJoyCommandNode.cpp 的 is_wheel_ 保持一致。
+WHEEL_ARM_VERSIONS_BEYOND_MAJOR = (410062, 410063)
+
+
+def is_wheel_arm_version(version) -> bool:
+    """major==6 的轮臂，以及编码后 major 不再是 6 的轮臂版本。"""
+    robot_version = _coerce_robot_version(version)
+    if robot_version is None:
+        return False
+    if robot_version.start_with(major=6):
+        return True
+    return robot_version.version_number() in WHEEL_ARM_VERSIONS_BEYOND_MAJOR
+
+
 def is_tact_robot_type_compatible(tact_robot_type, current_robot_version) -> bool:
     """判断 .tact 文件 robotType 是否兼容当前机器人版本。"""
     tact_version = _coerce_robot_version(tact_robot_type)
