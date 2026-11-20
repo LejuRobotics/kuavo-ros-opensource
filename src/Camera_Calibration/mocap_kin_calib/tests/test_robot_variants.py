@@ -163,7 +163,7 @@ class VariantTests(unittest.TestCase):
         recorder = SimpleNamespace(main=Mock(), _load_config=Mock(),
                                    _apply_robot_calibration_defaults=Mock())
         modules = {'mocap_joint_calib': SimpleNamespace(record_joint_poses=recorder)}
-        for version in ('55', '200053', '400055'):
+        for version in ('55', '57', '200053', '400055'):
             argv = [str(HERE / 'record_joint_poses.py'), '--robot-version', version,
                     '--urdf', '/missing/test.urdf', '--kuavo-json', '/missing/test.json']
             with self.subTest(version=version), patch.dict(sys.modules, modules), patch.object(sys, 'argv', argv):

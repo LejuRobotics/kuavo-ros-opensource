@@ -15,6 +15,7 @@ VERSION_REGISTRY = {
     "52":   {"internal": 52,     "series": "kuavo5",  "desc": "普通kuavo5"},
     "53":   {"internal": 53,     "series": "kuavo5",  "desc": "手臂pitch电机改ruiwo"},
     "55":   {"internal": 55,     "series": "kuavo5",  "desc": "手臂部分电机改ruiwoPA4310"},
+    "57":   {"internal": 57,     "series": "kuavo5",  "desc": "55基础上2/8/13关节使用弓望编码器"},
     "60":   {"internal": 60,     "series": "kuavo5w", "desc": "悟时底盘轮臂"},
     "61":   {"internal": 61,     "series": "kuavo5w", "desc": "玖物底盘轮臂"},
     "13":   {"internal": 13,     "series": "roban",   "desc": "roban2.0版本"},

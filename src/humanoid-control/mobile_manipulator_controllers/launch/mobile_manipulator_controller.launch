@@ -9,7 +9,7 @@
   <arg name="visualize_humanoid" default="true"/>
   <arg name="visualize_mm" default="false"/>
   <arg name="robot_version" default="$(optenv ROBOT_VERSION 40)"/>
-    <arg name="resource_version" default="$(eval 55 if int(arg('robot_version')) == 57 else arg('robot_version'))"/>
+    <arg name="resource_version" default="$(arg robot_version)"/>
   <arg name="coredump" default="false"/>
   <arg name="with_coredump" value="--with-coredump" if="$(arg coredump)"/>
   <arg name="with_coredump" value="" unless="$(arg coredump)"/>

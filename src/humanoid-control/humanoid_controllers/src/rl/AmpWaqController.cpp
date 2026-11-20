@@ -23,14 +23,14 @@ bool AmpWaqController::loadConfig(const std::string& config_file) {
   nh_.getParam("/robot_version", version);
   activity_command_ = config.get<double>("waqActivityCommand", 1.0);
   publish_network_input_ = config.get<bool>("waqLogging.publishNetworkInput", false);
-  if ((version != 54 && version != 55) || jointNum_ != 12 || waistNum_ != 1 || jointArmNum_ != 14 ||
+  if ((version != 54 && version != 55 && version != 57) || jointNum_ != 12 || waistNum_ != 1 || jointArmNum_ != 14 ||
       config.get<int>("frameStack") != 10 || config.get<int>("numSingleObs") != 91 ||
       std::abs(config.get<double>("inferenceFrequency") - 100.0) > 1e-6 ||
       std::abs(config.get<double>("actionScale") - 0.25) > 1e-6 ||
       !std::isfinite(activity_command_) || activity_command_ < 0.0 || activity_command_ > 1.0 ||
       !config.get<bool>("withArm") ||
       config.get<bool>("use_external_waist_controller", false)) {
-    ROS_ERROR("[%s] AMP WAQ requires S54/S55, 27 joints, 10x91 input, 100 Hz, scale .25, withArm=true and external waist control disabled", name_.c_str());
+    ROS_ERROR("[%s] AMP WAQ requires S54/S55/S57, 27 joints, 10x91 input, 100 Hz, scale .25, withArm=true and external waist control disabled", name_.c_str());
     return false;
   }
   // Reuse AMP's optional arm-mode controller after policy actuation. The WAQ

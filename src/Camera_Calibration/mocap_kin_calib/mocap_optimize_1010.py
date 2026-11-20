@@ -1039,7 +1039,7 @@ def _config_for_capture(cfg: Mapping, meta: Mapping):
     spec = rv.spec(version)
     if spec is None or spec.layout not in ("biped56", "wheel62"):
         raise ValueError(
-            f"unsupported robot_version={version!r}; 运动学标定仅支持基础型号 53/55/56/62/63 "
+            f"unsupported robot_version={version!r}; 运动学标定仅支持基础型号 53/55/56/57/62/63 "
             "及对应小版本（200053/400055/400062/500062/400063/500063）"
         )
     is_wheel = spec.layout == "wheel62"

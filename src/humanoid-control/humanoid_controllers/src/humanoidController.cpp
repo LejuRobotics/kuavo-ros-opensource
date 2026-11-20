@@ -38,6 +38,9 @@
 #include <std_srvs/Trigger.h>
 #include <algorithm> 
 #include <angles/angles.h>
+#ifdef HUMANOID_CONTROLLERS_HAS_EKF
+#include <robot_localization/ToggleFilterProcessing.h>
+#endif
 #include <time.h>
 #include <humanoid_estimation/FromTopiceEstimate.h>
 #include <humanoid_estimation/LinearKalmanFilter.h>
@@ -1550,7 +1553,10 @@ namespace humanoid_controller
       sitDownWbc_->setWaistNums(waistNum_);
       sitDownWbc_->loadTasksSetting(taskFile, verbose, is_real_);
 
-      sitControlManager_->setupRos(controllerNh_);
+      if (humanoid_controller::SitControlManager::robotSupportsSeatControl(
+              drake_interface_->getRobotVersion())) {
+        sitControlManager_->setupRos(controllerNh_);
+      }
       // 坐起身控制器：段0 执行；ROS 入口（seat_return / real_initial_start / done）留主类
       sitUp_ = std::make_unique<humanoid_controller::SitUpController>(controllerNh_, *sitControlManager_);
       sitUp_->setMrt(mrtRosInterface_.get());
@@ -2281,6 +2287,52 @@ void humanoidController::sensorsDataCallback(const kuavo_msgs::sensorsData::Cons
     if (!is_initialized_)
       is_initialized_ = true;
   }
+  void humanoidController::syncEkfFilterProcessing()
+  {
+#ifndef HUMANOID_CONTROLLERS_HAS_EKF
+    return;
+#else
+    if (ekf_filter_processing_on_.load(std::memory_order_acquire) == ekf_filter_processing_desired_)
+    {
+      return;
+    }
+    if (ekf_toggle_inflight_.load(std::memory_order_acquire))
+    {
+      return;
+    }
+    const ros::Time now = ros::Time::now();
+    if (!ekf_toggle_last_attempt_.isZero() && (now - ekf_toggle_last_attempt_).toSec() < 0.5)
+    {
+      return;
+    }
+    bool expected = false;
+    if (!ekf_toggle_inflight_.compare_exchange_strong(expected, true))
+    {
+      return;
+    }
+    ekf_toggle_last_attempt_ = now;
+    const bool enable = ekf_filter_processing_desired_;
+    ros::NodeHandle nh = controllerNh_;
+    std::thread([this, nh, enable]() mutable {
+      ros::ServiceClient client =
+          nh.serviceClient<robot_localization::ToggleFilterProcessing>("/ekf_se/toggle");
+      robot_localization::ToggleFilterProcessing srv;
+      srv.request.on = enable;
+      if (client.call(srv))
+      {
+        ekf_filter_processing_on_.store(enable, std::memory_order_release);
+        ROS_INFO("[HumanoidController] EKF filter processing %s", enable ? "resumed" : "paused");
+      }
+      else
+      {
+        ROS_WARN_THROTTLE(5.0, "[HumanoidController] call /ekf_se/toggle failed (enable=%s)",
+                          enable ? "true" : "false");
+      }
+      ekf_toggle_inflight_.store(false, std::memory_order_release);
+    }).detach();
+#endif
+  }
+
   void humanoidController::updatakinematics(const SensorData &sensor_data, bool is_initialized_)
   {
    
@@ -2337,15 +2389,53 @@ void humanoidController::sensorsDataCallback(const kuavo_msgs::sensorsData::Cons
     kinematicPub_.publish(kinematics_odom);
     { // robotlocalization_data_mutex_
       std::lock_guard<std::mutex> lock(robotlocalization_data_mutex_);
-      // 重置后优先对齐 IMU，并丢掉回调线程可能刚塞回来的 localization，避免标志被推迟消费
+      // 重置后先用 IMU yaw。定位 yaw 与 IMU 差得大时丢掉该样本并继续等待，
+      // 避免 AMP 期间空转积出的 yaw 在切回 MPC 的第一拍被腿部 IK 锁死。
       if (align_fused_yaw_to_imu_)
       {
+        constexpr double kLocalizationYawAgreeMax = 0.1;  // rad
+        Eigen::Quaterniond sensor_quat(sensor_data_new.quat_.coeffs().w(),
+                                       sensor_data_new.quat_.coeffs().x(),
+                                       sensor_data_new.quat_.coeffs().y(),
+                                       sensor_data_new.quat_.coeffs().z());
+        const Eigen::Vector3d sensor_euler = quatToZyx(sensor_quat);
+        bool accepted = false;
         while (!robotlocalizationDataQueue.empty())
         {
+          const nav_msgs::Odometry localization = robotlocalizationDataQueue.front();
           robotlocalizationDataQueue.pop();
+          const Eigen::Quaterniond localization_quat(localization.pose.pose.orientation.w,
+                                                     localization.pose.pose.orientation.x,
+                                                     localization.pose.pose.orientation.y,
+                                                     localization.pose.pose.orientation.z);
+          const Eigen::Vector3d localization_euler = quatToZyx(localization_quat);
+          const double yaw_diff = std::abs(angles::shortest_angular_distance(
+              localization_euler(0), sensor_euler(0)));
+          if (yaw_diff > kLocalizationYawAgreeMax)
+          {
+            ROS_WARN_THROTTLE(1.0,
+                              "[ResetKinematics] drop localization yaw %.3f rad, IMU yaw %.3f rad, diff %.3f rad",
+                              localization_euler(0), sensor_euler(0), yaw_diff);
+            continue;
+          }
+          Eigen::Vector3d fused_euler;
+          fused_euler << localization_euler(0), sensor_euler(1), sensor_euler(2);
+          robot_quat_state_update_ = Eigen::AngleAxisd(fused_euler[0], Eigen::Vector3d::UnitZ()) *
+                                     Eigen::AngleAxisd(fused_euler[1], Eigen::Vector3d::UnitY()) *
+                                     Eigen::AngleAxisd(fused_euler[2], Eigen::Vector3d::UnitX());
+          accepted = true;
+          ROS_INFO("[ResetKinematics] localization yaw aligned with IMU (diff %.4f rad), resume fusion",
+                   yaw_diff);
+          break;
         }
-        robot_quat_state_update_ = sensor_data_new.quat_;
-        align_fused_yaw_to_imu_ = false;
+        if (!accepted)
+        {
+          robot_quat_state_update_ = sensor_data_new.quat_;
+        }
+        else
+        {
+          align_fused_yaw_to_imu_ = false;
+        }
       }
       else if(!robotlocalizationDataQueue.empty())
       {
@@ -2418,7 +2508,7 @@ void humanoidController::sensorsDataCallback(const kuavo_msgs::sensorsData::Cons
       {
         robotlocalizationDataQueue.pop();
       }
-      // 下一帧丢弃 localization 并对齐当前 IMU yaw
+      // 之后持续用 IMU yaw，直到定位 yaw 与 IMU 接近再恢复融合
       align_fused_yaw_to_imu_ = true;
     }
     
@@ -4124,6 +4214,9 @@ void humanoidController::fillHeadJointCmd(kuavo_msgs::jointCmd& msg, int head_st
       else
         ROS_WARN("[Switch/RL->MPC] skip: no cached last_rl_joint_cmd");
     }
+    // AMP/RL 不发布 /imu_data 和 /kinematic_data，EKF 会按上次角速度空转。
+    ekf_filter_processing_desired_ = !is_rl_controller_;
+    syncEkfFilterProcessing();
     // last_is_rl_controller_ = is_rl_controller_;
 
     //waao

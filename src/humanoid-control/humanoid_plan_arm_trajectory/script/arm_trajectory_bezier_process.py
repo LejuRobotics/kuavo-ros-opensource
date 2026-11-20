@@ -353,7 +353,7 @@ class ArmTrajectoryBezierDemo:
 
         robot_version_str = str(self.robot_version.version_number())
 
-        rl_config_subdir = "amp" if robot_version_str == "55" else "rl"
+        rl_config_subdir = "amp" if robot_version_str in ("55", "57") else "rl"
         rl_path = os.path.join(
             humanoid_controllers_path, "config",
             f"kuavo_v{robot_version_str}", rl_config_subdir, "skw_rl_param.info"
@@ -378,7 +378,7 @@ class ArmTrajectoryBezierDemo:
 
         mpc_path = os.path.join(
             humanoid_controllers_path, "config",
-            f"kuavo_v{'55' if robot_version_str == '57' else robot_version_str}", "mpc", "task.info"
+            f"kuavo_v{robot_version_str}", "mpc", "task.info"
         )
         if os.path.exists(mpc_path):
             try:

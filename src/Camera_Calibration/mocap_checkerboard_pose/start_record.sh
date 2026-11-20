@@ -10,7 +10,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/../robot_versions.sh"
 
 if [ "$#" -gt 2 ] || { [ -n "$MOCAP_SOURCE" ] && [ "$MOCAP_SOURCE" != "motive" ] && [ "$MOCAP_SOURCE" != "qingtong" ]; }; then
-  echo "用法: bash $0 [motive|qingtong] [45|49|52|53|55|56|62|63 及对应小版本]" >&2
+  echo "用法: bash $0 [motive|qingtong] [45|49|52|53|55|56|57|62|63 及对应小版本]" >&2
   exit 2
 fi
 ROBOT_VERSION_BASE="$(rv_fold "$ROBOT_VERSION_SELECTED")"

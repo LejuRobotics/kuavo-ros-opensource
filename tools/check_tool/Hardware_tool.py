@@ -1605,12 +1605,12 @@ def secondary_menu():
 
                     elif (rv.start_with(5, 0) or rv.start_with(5, 1) or rv.start_with(5, 2)
                           or rv.start_with(5, 3) or rv.start_with(5, 4) or rv.start_with(5, 5)
-                          or rv.start_with(5, 6)):
+                          or rv.start_with(5, 6) or rv.start_with(5, 7)):
                         kuavo_breakin_script = os.path.join(folder_path, "joint_breakin_ros", "src", "breakin_control", "scripts", "breakin_main_controller.py")
                         script_description = f"Kuavo5磨线脚本 joint_breakin_ros/src/breakin_control/scripts/breakin_main_controller.py (版本 {robot_version})"
 
                     else:
-                        print(bcolors.WARNING + f"警告：版本 {robot_version} 不在支持的范围内（13-14、17、40-49、50-56、62-63），当前不支持自动选择磨线脚本" + bcolors.ENDC)
+                        print(bcolors.WARNING + f"警告：版本 {robot_version} 不在支持的范围内（13-14、17、40-49、50-57、62-63），当前不支持自动选择磨线脚本" + bcolors.ENDC)
                 except (ValueError, TypeError):
                     print(bcolors.WARNING + f"警告：无法解析版本号 {robot_version}，请检查 ~/.bashrc 中的 ROBOT_VERSION 设置" + bcolors.ENDC)
             else:

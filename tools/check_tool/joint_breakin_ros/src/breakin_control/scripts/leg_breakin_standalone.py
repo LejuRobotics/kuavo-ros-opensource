@@ -162,10 +162,22 @@ class LegBreakinStandalone:
         except (ValueError, TypeError):
             return False
 
+    def _is_robot_version_57(self, robot_version: str):
+        rv_raw = str(robot_version or "").strip()
+        rv = rv_raw.lower()
+        if "v57" in rv or "kuavo5_v57" in rv:
+            return True
+        try:
+            return int(rv_raw) == 57
+        except (ValueError, TypeError):
+            return False
+
     def _select_kuavo5_leg_script(self, robot_version: str):
-        """Kuavo5 数字/字符串版本 → 对应腿部脚本（53/55/56 独立目录，其余沿用原默认）。"""
+        """Kuavo5 数字/字符串版本 → 对应腿部脚本（57复用55，其余沿用原默认）。"""
         if self._is_robot_version_53(robot_version):
             return self.kuavo5_leg_breakin_script_v53
+        if self._is_robot_version_57(robot_version):
+            return self.kuavo5_leg_breakin_script_v55
         if self._is_robot_version_55(robot_version):
             return self.kuavo5_leg_breakin_script_v55
         if self._is_robot_version_56(robot_version):
@@ -305,7 +317,9 @@ class LegBreakinStandalone:
         # 选择腿部磨线脚本
         # 优先读取环境变量 LEG_BREAKIN_DIR（由主控制器传递）
         leg_breakin_dir = os.environ.get("LEG_BREAKIN_DIR")
-        if leg_breakin_dir:
+        if self._is_robot_version_57(robot_version):
+            target_script = self.kuavo5_leg_breakin_script_v55
+        elif leg_breakin_dir:
             # 根据环境变量选择对应的脚本
             if leg_breakin_dir == "leg_breakin_kuavo5_v52_80A":
                 target_script = self.kuavo5_leg_breakin_script_v52_80A

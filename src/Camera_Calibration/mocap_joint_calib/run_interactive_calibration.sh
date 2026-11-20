@@ -33,7 +33,7 @@ info() { echo "[INFO] $*"; }
 source "${CAMERA_CAL_DIR}/robot_versions.sh"
 
 # 标定流程受支持的版本：45/49 走 biped45（无腰、臂索引 12/19、FK 根 base_link），
-# 52 走 biped52，53/55/56 走 biped56，62/63 走 wheel62。未列入者不接受，
+# 52 走 biped52，53/55/56/57 走 biped56，62/63 走 wheel62。未列入者不接受，
 # 避免静默套用错误机型的索引。
 is_supported_version() {
   rv_supported "${1:-}"
@@ -138,7 +138,7 @@ select_robot_version() {
     info "自动检测机器人版本: ${selected}（来源：环境变量 ROBOT_VERSION）"
   else
     warn "未从环境变量或 ROS 参数检测到受支持的机器人版本"
-    read -r -p "机器人版本 [45|49|52|53|55|56|62|63 及对应小版本，如 100049/200053/400055/500062]: " selected
+    read -r -p "机器人版本 [45|49|52|53|55|56|57|62|63 及对应小版本，如 100049/200053/400055/500062]: " selected
   fi
 
   if ! is_supported_version "${selected}"; then

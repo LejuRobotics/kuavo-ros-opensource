@@ -14,8 +14,8 @@ usage() {
   - test: 读取 teach_*_joint_test.json 下发测试姿态并采数到带 _test 后缀目录，采数完自动画图输出测试图片
   - move: 仅下发 teach JSON 中的多姿态关节轨迹（不采数、不写 CSV），适用于“内参标定只需运动覆盖”的场景
   - 机型：默认读 ROBOT_VERSION，小版本按 %100 折回基础型号后查表
-    （45/49→biped45，52→biped52，53/55/56→biped56，62/63→wheel62）；
-    支持 45/49/52/53/55/56/62/63 及对应小版本（如 100049/200049、200053/300053、
+    （45/49→biped45，52→biped52，53/55/56/57→biped56，62/63→wheel62）；
+    支持 45/49/52/53/55/56/57/62/63 及对应小版本（如 100049/200049、200053/300053、
     400055、200062/500062、400063/500063）；可用 --robot_layout 覆盖
   - 腕部三路相机仅 biped52/biped56/wheel62 布局支持；biped45（45 与 49 系列）只做头部
 
@@ -117,7 +117,7 @@ if [[ -n "${ROBOT_LAYOUT_ARG}" && -n "${ROBOT_VERSION:-}" ]] && rv_supported "${
 fi
 
 # 标定 URDF 与输出由统一机型表给出：45 与 49 系列同布局，但各用各的
-# biped_v3_arm_s45/_s49；53/55/56 和 62/63 各用自身模板，
+# biped_v3_arm_s45/_s49；53/55/56/57 和 62/63 各用自身模板，
 # 标完互不覆盖。未设置 ROBOT_VERSION（只给了 --robot_layout）时无法区分同布局内的这些型号，
 # 只能退回按布局的默认文件（biped45 → s45、biped56 → s56），因此实机务必带上 ROBOT_VERSION。
 if [[ -n "${ROBOT_VERSION:-}" ]] && rv_supported "${ROBOT_VERSION}"; then

@@ -56,6 +56,11 @@ ENCODER_RANGE_TABLE = {
         7: BIT_17_18, 8: BIT_17_25, 9: BIT_17_18, 10: BIT_17_18, 11: BIT_17_18, 12: BIT_17_18,
         13: BIT_17_25
     },
+    57: {
+        1: BIT_17_18, 2: BIT_17_25, 3: BIT_17_18, 4: BIT_17_18, 5: BIT_17_18, 6: BIT_17_18,
+        7: BIT_17_18, 8: BIT_17_25, 9: BIT_17_18, 10: BIT_17_18, 11: BIT_17_18, 12: BIT_17_18,
+        13: BIT_17_25
+    },
     10045: {
         1: BIT_17_18, 2: BIT_17_10, 3: BIT_17_10, 4: BIT_17_18, 5: BIT_17_36, 6: BIT_17_36,
         7: BIT_17_18,8: BIT_17_10, 9: BIT_17_10, 10: BIT_17_18, 11: BIT_17_36, 12: BIT_17_36,
@@ -113,6 +118,11 @@ JOINT2SLAVE_TABLE = {
         13: 14,
     },
     55: {
+        1: 2, 2: 3, 3: 4, 4: 5, 5: 6, 6: 7,
+        7: 8, 8: 9, 9: 10, 10: 11, 11: 12, 12: 13,
+        13: 14,
+    },
+    57: {
         1: 2, 2: 3, 3: 4, 4: 5, 5: 6, 6: 7,
         7: 8, 8: 9, 9: 10, 10: 11, 11: 12, 12: 13,
         13: 14,
@@ -207,6 +217,8 @@ class EcMasterConfig:
         elif robot_version == 53:
             return "kuavo5_v53", 13
         elif robot_version == 55:
+            return "kuavo5_v55", 13
+        elif robot_version == 57:
             return "kuavo5_v55", 13
         else:
             print(f"\033[33mwarning: 机器人版本不存在, 使用默认值 'kuavo' 机器人类型\033[0m", file=sys.stderr)

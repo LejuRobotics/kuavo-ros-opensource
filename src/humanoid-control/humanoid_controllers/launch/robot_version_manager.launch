@@ -4,7 +4,7 @@
     <arg name="rviz"               default="false" />
     <arg name="description_name"   default="humanoid_description"/>
     <arg name="robot_version"      default="$(optenv ROBOT_VERSION 40)"/>
-    <arg name="resource_version" default="$(eval 55 if int(arg('robot_version')) == 57 else arg('robot_version'))"/>
+    <arg name="resource_version" default="$(arg robot_version)"/>
     <param name="robot_version"    value="$(arg robot_version)"/>
   
     <!-- <arg name="urdfFile"           default="$(find biped_s3)/urdf/biped_s3_with_v3_arm.urdf"/> -->
