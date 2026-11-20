@@ -21,13 +21,13 @@ from utils.vr_connect_gate import (
 
 # 导入RobotVersion，兼容不同环境
 try:
-    from robot_version import RobotVersion
+    from robot_version import RobotVersion, is_wheel_arm_version
 except ImportError:
     import rospkg
     rospack = rospkg.RosPack()
     import sys
     sys.path.insert(0, os.path.join(rospack.get_path('kuavo_common'), 'python'))
-    from robot_version import RobotVersion
+    from robot_version import RobotVersion, is_wheel_arm_version
 
 import time
 import signal
@@ -678,11 +678,11 @@ def is_not_wheel_robot(event):
     轮臂机器人版本号以6开头（60-69），禁止切换walk/trot步态
     返回True允许状态切换，返回False阻止切换
     """
-    # 判断是否为轮臂机器人(6代: major=6)
+    # 轮臂: major=6，以及 410062/410063（编码后 major 不再是 6）
     robot_version = os.environ.get('ROBOT_VERSION', '0')
     is_wheel = False
     try:
-        is_wheel = RobotVersion.create(int(robot_version)).start_with(major=6)
+        is_wheel = is_wheel_arm_version(robot_version)
     except (ValueError, TypeError):
         rospy.logerr(f"ROBOT_VERSION环境变量格式错误: {robot_version}，默认不为轮臂")
 
@@ -723,7 +723,7 @@ def _robot_kind_from_version(robot_version: str) -> str:
     if rv is not None:
         if rv.start_with(major=5):   # 50-59 人型
             return "humanoid"
-        if rv.start_with(major=6):   # 60-69 轮臂
+        if is_wheel_arm_version(rv):  # 60-69，以及 410062/410063
             return "wheel"
     # major 判不出来: 回退 ROBOT_MODULE(与 launch 选择同一真源)
     module = _robot_module_of_version(robot_version).strip().upper()

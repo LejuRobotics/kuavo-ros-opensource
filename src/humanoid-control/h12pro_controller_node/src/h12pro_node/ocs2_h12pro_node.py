@@ -79,11 +79,11 @@ except Exception as _e:
     rospy.logwarn(f"[REMOTE] g11_screen_protocol import failed, screen cmd disabled: {_e}")
 
 try:
-    from robot_version import RobotVersion
+    from robot_version import is_wheel_arm_version
 except ImportError:
     import sys
     sys.path.insert(0, os.path.join(rospack.get_path('kuavo_common'), 'python'))
-    from robot_version import RobotVersion
+    from robot_version import is_wheel_arm_version
 
 # =====================================================
 # 状态持久化常量
@@ -258,10 +258,10 @@ class H12ToJoyControllerNode:
         self._last_joy_pub_time = 0.0   # /joy 发布限频时间戳(见 JOY_PUB_PERIOD)
         self.is_stopping = False    # cd按钮下蹲标志位
 
-        # G12轮臂模式检测
+        # G12轮臂模式检测。410062/410063 编码后 major 不是 6，仍是轮臂。
         robot_version = os.environ.get('ROBOT_VERSION', '0')
         try:
-            self.is_wheel = RobotVersion.create(int(robot_version)).start_with(major=6)
+            self.is_wheel = is_wheel_arm_version(robot_version)
         except (ValueError, TypeError):
             self.is_wheel = False
 
