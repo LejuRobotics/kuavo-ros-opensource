@@ -38,6 +38,10 @@ find_package(Threads REQUIRED)
 target_link_libraries(velocity_ik_qp PUBLIC Threads::Threads)
 
 if(CATKIN_ENABLE_TESTING)
+add_executable(velocity_ik_continuous_torso_orientation_test continuous_torso_orientation_test.cpp)
+target_link_libraries(velocity_ik_continuous_torso_orientation_test Eigen3::Eigen)
+target_compile_options(velocity_ik_continuous_torso_orientation_test PRIVATE -UNDEBUG)
+add_test(NAME velocity_ik_continuous_torso_orientation_test COMMAND velocity_ik_continuous_torso_orientation_test)
 add_executable(velocity_ik_frozen_qp_test frozen_qp_test.cpp)
 target_link_libraries(velocity_ik_frozen_qp_test PRIVATE velocity_ik_qp)
 add_executable(velocity_ik_local_regression_test local_regression_test.cpp)
@@ -97,6 +101,9 @@ if(VELOCITY_IK_BUILD_OPERATING_REPLAY)
   add_executable(velocity_ik_xb_mapping_resume_test xb_mapping_resume_test.cpp)
   target_include_directories(velocity_ik_xb_mapping_resume_test PRIVATE ../include ${VELOCITY_IK_MESSAGE_INCLUDE} ${catkin_INCLUDE_DIRS})
   target_link_libraries(velocity_ik_xb_mapping_resume_test PRIVATE velocity_ik_model velocity_ik_qp ${catkin_LIBRARIES})
+  add_test(NAME velocity_ik_xb_mapping_resume COMMAND ${PYTHON_EXECUTABLE}
+    ${CMAKE_CURRENT_SOURCE_DIR}/../test/run_torso_permission_regression.py
+    $<TARGET_FILE:velocity_ik_xb_mapping_resume_test> 62 normal)
   add_executable(velocity_ik_xa_prepare_handoff_test xa_prepare_handoff_test.cpp)
   target_include_directories(velocity_ik_xa_prepare_handoff_test PRIVATE ../include ${VELOCITY_IK_MESSAGE_INCLUDE} ${catkin_INCLUDE_DIRS})
   target_link_libraries(velocity_ik_xa_prepare_handoff_test PRIVATE velocity_ik_model velocity_ik_qp ${catkin_LIBRARIES})
@@ -142,6 +149,11 @@ if(CATKIN_ENABLE_TESTING OR VELOCITY_IK_BUILD_OPERATING_REPLAY)
   if(VELOCITY_IK_CATKIN_BUILD)
     add_dependencies(velocity_ik_torso_permission_test ${VELOCITY_IK_MESSAGE_TARGETS})
   endif()
+  foreach(model 62 63)
+    add_test(NAME velocity_ik_torso_orientation_${model} COMMAND ${PYTHON_EXECUTABLE}
+      ${CMAKE_CURRENT_SOURCE_DIR}/../test/run_torso_permission_regression.py
+      $<TARGET_FILE:velocity_ik_torso_permission_test> ${model} torso_orientation)
+  endforeach()
   add_test(NAME velocity_ik_arm_follow_entry COMMAND ${PYTHON_EXECUTABLE}
     ${CMAKE_CURRENT_SOURCE_DIR}/../test/run_torso_permission_regression.py
     $<TARGET_FILE:velocity_ik_torso_permission_test> 62 follow_entry)

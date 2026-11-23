@@ -217,10 +217,10 @@ namespace humanoidController_wheel_wbc
     robot_config_ = drake_interface_->getRobotConfig();
     kuavo_settings_ = drake_interface_->getKuavoSettings();
 
-    bool hasQibeng = false;
+    bool useFoldedArmPose = false;
     for (const auto& eef_type : kuavo_settings_.hardware_settings.end_effector_type) {
-      if (eef_type == EndEffectorType::qibeng) {
-        hasQibeng = true;
+      if (eef_type == EndEffectorType::qibeng || eef_type == EndEffectorType::heiman) {
+        useFoldedArmPose = true;
         break;
       }
     }
@@ -468,9 +468,8 @@ namespace humanoidController_wheel_wbc
       mujoco_q[2] = 0.0;
     }
     mujoco_q[3] = 1.0;
-    // 62/63 气泵夹爪版（短版本 patch==0）且硬件标记 hasQibeng 时使用专用初始姿态。
-    if ((rb_version.major() == 6 && rb_version.patch() == 0 &&
-         (rb_version.minor() == 2 || rb_version.minor() == 3)) && hasQibeng)
+    // 末端为 qibeng 或 heiman 时使用同一套初始姿态，不限 62/63 或 400062/410062。
+    if (useFoldedArmPose)
     {
       mujoco_q[11] = 0.5236;
       mujoco_q[14] = -1.57;

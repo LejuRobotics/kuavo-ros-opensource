@@ -401,6 +401,32 @@ namespace wheel_absolute_control
     std::condition_variable lockParameterWake_;
     bool stopLockParameterWorker_{false};  // protected by wait mutex
 
+    struct AsyncHandFkSample {
+      ros::Time stamp;
+      size_t count{0};
+      std::array<std::array<double, 7>, 4> poses{};
+    };
+    struct AsyncArmTrajSample {
+      ros::Time stamp;
+      size_t count{0};
+      std::array<double, 32> pos_deg{};
+      std::array<double, 32> vel_deg{};
+    };
+    struct AsyncCmdPrepareSample {
+      std::array<double, 12> data{};
+    };
+    static constexpr size_t kAsyncTelemetryCapacity = 128;
+    std::array<AsyncHandFkSample, kAsyncTelemetryCapacity> asyncHandFkRing_{};
+    std::atomic<size_t> asyncHandFkRead_{0}, asyncHandFkWrite_{0};
+    std::array<AsyncArmTrajSample, kAsyncTelemetryCapacity> asyncArmTrajRing_{};
+    std::atomic<size_t> asyncArmTrajRead_{0}, asyncArmTrajWrite_{0};
+    std::array<AsyncCmdPrepareSample, kAsyncTelemetryCapacity> asyncCmdPrepareRing_{};
+    std::atomic<size_t> asyncCmdPrepareRead_{0}, asyncCmdPrepareWrite_{0};
+    std::atomic<bool> stopAsyncTelemetryWorker_{false};
+    std::thread asyncTelemetryWorker_;
+    bool last_cmd_vel_was_locked_{false};
+    bool last_cmd_vel_was_stopped_{false};
+
     // ========== 运动学计算 ==========
     std::shared_ptr<humanoid_controller::WaistKinematics> waistKinematics_;
 

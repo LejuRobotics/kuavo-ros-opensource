@@ -32,7 +32,8 @@
     <arg name="vr_transform_debug_publish_hz" default="10.0" /> <!-- 调试话题与Marker发布频率 -->
     <arg name="finger_processing_hz" default="30.0" /> <!-- 手指异步处理频率 -->
     <arg name="ik_solution_timeout_s" default="0.2" /> <!-- VR无新解时暂停重复轨迹发布的超时 -->
-    <arg name="ee_type" default="$(eval 'lejuclaw' if int(arg('robot_version')) == 210062 else ('heiman' if int(arg('robot_version')) in (400062, 400063, 410062, 410063) else 'qiangnao'))"/>
+    <!-- 空表示调用方没传 ee_type。此时不写 /end_effector_type，保留硬件节点已设置的值。 -->
+    <arg name="ee_type" default=""/>
     <arg name="enable_head_control" default="true"/>
     <arg name="hand_reference_mode" default="thumb_index"/> <!-- fingertips, middle_finger, thumb_index -->
     <arg name="dagger_candidate_only" default="false"/>
@@ -134,8 +135,10 @@
     <param name="control_torso" value="$(arg control_torso)" type="bool"/>
     <!-- 设置全局参数，供其他节点统一读取 -->
     <param name="/wheel_ik" value="$(arg wheel_ik)" type="bool"/>
-    <!-- Python and C++ hand control both read the absolute end-effector parameter. -->
-    <param name="/end_effector_type" value="$(arg ee_type)"/>
+    <!-- 只有显式传入 ee_type:=... 时才覆盖 /end_effector_type。 -->
+    <group if="$(eval arg('ee_type') != '')">
+        <param name="/end_effector_type" value="$(arg ee_type)"/>
+    </group>
     <group if="$(arg use_cpp_incremental_ik)">
         <param name="/control_finger_type" value="$(arg control_finger_type)" type="int"/>
     </group>

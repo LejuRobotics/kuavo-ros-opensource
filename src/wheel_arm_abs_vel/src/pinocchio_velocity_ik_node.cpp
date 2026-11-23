@@ -12,6 +12,7 @@
 #include "../velocity_ik/channel_observation.h"
 #include "../velocity_ik/startup_readiness.h"
 #include "../velocity_ik/continuous_reference.h"
+#include "../velocity_ik/continuous_torso_orientation.h"
 #include "../velocity_ik/fixed_prepare_transaction.h"
 #include "../velocity_ik/manual_lower_body.h"
 #include <wheel_arm_abs_vel/ManualLowerBody.h>
@@ -43,6 +44,26 @@
 #include <limits>
 #include <memory>
 #include <mutex>
+#include <pthread.h>
+
+namespace velocity_ik {
+struct PrioInheritMutex {
+  pthread_mutex_t m_{};
+  PrioInheritMutex() noexcept {
+    pthread_mutexattr_t attr{};
+    pthread_mutexattr_init(&attr);
+    pthread_mutexattr_setprotocol(&attr, PTHREAD_PRIO_INHERIT);
+    pthread_mutex_init(&m_, &attr);
+    pthread_mutexattr_destroy(&attr);
+  }
+  ~PrioInheritMutex() noexcept { pthread_mutex_destroy(&m_); }
+  PrioInheritMutex(const PrioInheritMutex&) = delete;
+  PrioInheritMutex& operator=(const PrioInheritMutex&) = delete;
+  void lock() noexcept { pthread_mutex_lock(&m_); }
+  void unlock() noexcept { pthread_mutex_unlock(&m_); }
+  bool try_lock() noexcept { return pthread_mutex_trylock(&m_) == 0; }
+};
+}  // namespace velocity_ik
 #include <stdexcept>
 #include <string>
 #include <thread>
@@ -218,7 +239,7 @@ class PinocchioVelocityIk {
           {
             // Serialize the terminal latch with formal publication. A false
             // event or a later target cannot reactivate this process.
-            std::lock_guard<std::mutex> lock(terminal_publication_mutex_);
+            std::lock_guard<velocity_ik::PrioInheritMutex> lock(terminal_publication_mutex_);
             if (terminal_stop_requested_.exchange(true)) return;
             captured_ns = monotonicNs();
           }
@@ -371,17 +392,37 @@ class PinocchioVelocityIk {
     spinner.start();
     startFeasibilityWorker();
     velocity_ik::configureIkThread();
-    ros::WallRate rate(solver_rate_hz_);
+    const int64_t period_ns = std::max<int64_t>(
+        100000LL, static_cast<int64_t>(1.0e9 / std::max(solver_rate_hz_, 1.0)));
+    int64_t next_due_ns = 0;
     kuavo_e2e::Deadline deadline(0);
     uint64_t runtime_probe_serial=0;
     while (ros::ok()) {
       velocity_ik::runtime_probe::Scope runtime_scope(runtime_probe_,++runtime_probe_serial);
-      if (deadline.enabled()) deadline.wait();
+      if (deadline.enabled()) {
+        deadline.wait();
+      }
       velocity_ik::runtime_probe::point(2);
       publishOnce();
       velocity_ik::runtime_probe::point(94);
       runtime_scope.reference(reference_sequence_);
-      if (!deadline.enabled()) rate.sleep();
+      if (!deadline.enabled()) {
+        timespec now_ts{};
+        clock_gettime(CLOCK_MONOTONIC, &now_ts);
+        const int64_t now_ns = static_cast<int64_t>(now_ts.tv_sec) * 1000000000LL + now_ts.tv_nsec;
+        if (next_due_ns == 0) {
+          next_due_ns = now_ns + period_ns;
+        } else {
+          next_due_ns += period_ns;
+          // Skip expired releases instead of firing zero-sleep catch-up bursts
+          if (next_due_ns < now_ns) {
+            next_due_ns = now_ns + period_ns - ((now_ns - next_due_ns) % period_ns);
+          }
+        }
+        timespec due_ts{static_cast<time_t>(next_due_ns / 1000000000LL),
+                        static_cast<long>(next_due_ns % 1000000000LL)};
+        while (clock_nanosleep(CLOCK_MONOTONIC, TIMER_ABSTIME, &due_ts, nullptr) == EINTR) {}
+      }
       velocity_ik::runtime_probe::point(96);
     }
     stopFeasibilityWorker();
@@ -412,6 +453,7 @@ class PinocchioVelocityIk {
     Eigen::Quaterniond root_orientation{Eigen::Quaterniond::Identity()};
     Eigen::Vector3d chest_position{Eigen::Vector3d::Zero()};
     Eigen::Quaterniond chest_orientation{Eigen::Quaterniond::Identity()};
+    velocity_ik::ContinuousTorsoOrientation torso_orientation;
     Eigen::Vector3d head_position{Eigen::Vector3d::Zero()};
     Eigen::Vector3d left_shoulder_position{Eigen::Vector3d::Zero()};
     Eigen::Vector3d right_shoulder_position{Eigen::Vector3d::Zero()};
@@ -903,7 +945,7 @@ class PinocchioVelocityIk {
   bool manualLowerBodyService(wheel_arm_abs_vel::ManualLowerBody::Request& req,
                               wheel_arm_abs_vel::ManualLowerBody::Response& res) {
     using Request = wheel_arm_abs_vel::ManualLowerBody::Request;
-    std::lock_guard<std::mutex> lock(manual_lower_mutex_);
+    std::lock_guard<velocity_ik::PrioInheritMutex> lock(manual_lower_mutex_);
     std::string reason;
     if (req.command == Request::QUERY) res.accepted = true;
     else if (req.command == Request::SET_TARGET) {
@@ -960,7 +1002,7 @@ class PinocchioVelocityIk {
           position_limit_margin_, boundary_brake_guard_);
       snapshot.lower[j]=envelope.lower; snapshot.upper[j]=envelope.upper;
     }
-    std::lock_guard<std::mutex> lock(manual_lower_mutex_);
+    std::lock_guard<velocity_ik::PrioInheritMutex> lock(manual_lower_mutex_);
     const auto previous = manual_lower_.state;
     manual_lower_.update(snapshot, dt);
     moving = manual_lower_.state == velocity_ik::ManualLowerBody::Moving;
@@ -2351,7 +2393,7 @@ class PinocchioVelocityIk {
                          double packet_dt, double source_stamp_dt,
                          double unique_sample_dt, double feedforward_sample_age,
                          double max_position_delta, double max_orientation_delta,
-                         std::unique_lock<std::mutex>* data_lock) {
+                         std::unique_lock<velocity_ik::PrioInheritMutex>* data_lock) {
     if (!publish_input_debug_) {
       data_lock->unlock();
       return;
@@ -2559,11 +2601,12 @@ class PinocchioVelocityIk {
     if (next.body.frame_id != body_tracking_frame_name_) {
       next.body.chest_valid = false;
     }
+    const bool chest_observation_valid = next.body.torsoValid();
 
     valid = valid && next.body.torsoValid() &&
         std::isfinite(next.source_relative_age) && next.source_relative_age <= target_timeout_;
     const bool source_allowed = sourceAllowed(message->source);
-    std::unique_lock<std::mutex> lock(data_mutex_);
+    std::unique_lock<velocity_ik::PrioInheritMutex> lock(data_mutex_);
     // Within one mapper session, an old operation cannot restore authority,
     // even if it repeats the last pose stamp (lifecycle-only publication).
     if (source_allowed && next.source == target_.source &&
@@ -2731,6 +2774,14 @@ class PinocchioVelocityIk {
       return;
     }
 
+    // Retain only the angle representation across an invalid/lifecycle packet
+    // in the same coordinates. It renews neither pose freshness nor authority,
+    // and prevents losing an unwrapped yaw branch before the next valid frame.
+    if (next.source == target_.source &&
+        next.body.frame_id == target_.body.frame_id &&
+        next.body.coordinate_epoch == target_.body.coordinate_epoch) {
+      next.body.torso_orientation = target_.body.torso_orientation;
+    }
     if (!valid) {
       ++rejected_invalid_count_;
       target_source_active_ = false;
@@ -2889,6 +2940,19 @@ class PinocchioVelocityIk {
       next.body_feedforward_sample_receive_time=next.receive_time;
     }
 
+    // Preserve the orientation branch across X+B/session metadata changes in
+    // the same tracking coordinates. The fixed human anchor is independently
+    // retained/recaptured by the existing X+B/X+A lifecycle. A source or body
+    // coordinate change starts a fresh representation.
+    if ((new_observation && chest_observation_valid) ||
+        !next.body.torso_orientation.valid) {
+      const Eigen::Matrix3d chest_calibration =
+          rotationFromRpy(Eigen::Vector3d(M_PI / 2.0, 0.0, M_PI / 2.0));
+      next.body.torso_orientation.update(
+          next.body.chest_orientation.toRotationMatrix() * chest_calibration.transpose(),
+          next.source_stamp.toSec());
+    }
+
     next.valid = true;
     target_source_active_ = true;
     source_interrupted_ = false;
@@ -2941,7 +3005,7 @@ class PinocchioVelocityIk {
         return;
       }
     }
-    std::lock_guard<std::mutex> lock(data_mutex_);
+    std::lock_guard<velocity_ik::PrioInheritMutex> lock(data_mutex_);
     if (!robot_measurement_freshness_.observe(message->header.stamp.toNSec(),
             ros::Time::now().toNSec(), static_cast<int64_t>(monotonicNs()), robot_state_timeout_)) {
       ROS_WARN_THROTTLE(2.0, "[VelocityIk] stale/repeated/future joint measurement rejected");
@@ -3005,7 +3069,7 @@ class PinocchioVelocityIk {
     const Eigen::Matrix3d rotation = orientation.toRotationMatrix();
     const double wrapped_yaw = std::atan2(rotation(1, 0), rotation(0, 0));
 
-    std::lock_guard<std::mutex> lock(data_mutex_);
+    std::lock_guard<velocity_ik::PrioInheritMutex> lock(data_mutex_);
     if (!base_measurement_freshness_.observe(message->header.stamp.toNSec(),
             ros::Time::now().toNSec(), static_cast<int64_t>(monotonicNs()), base_state_timeout_)) {
       ROS_WARN_THROTTLE(2.0, "[VelocityIk] stale/repeated/future base measurement rejected");
@@ -3058,7 +3122,7 @@ class PinocchioVelocityIk {
     if (message->data.size() < 3) {
       return;
     }
-    std::lock_guard<std::mutex> lock(data_mutex_);
+    std::lock_guard<velocity_ik::PrioInheritMutex> lock(data_mutex_);
     current_arm_mode_ = static_cast<int>(std::lround(message->data.at(0)));
     target_arm_mode_ = static_cast<int>(std::lround(message->data.at(1)));
     arm_mode_transitioning_ = std::lround(message->data.at(2)) != 0;
@@ -3578,27 +3642,22 @@ class PinocchioVelocityIk {
       return intent;
     }
     const auto& anchor = session_body_anchor_.human;
-    // Anatomical chest axes, identical to Quest's fixed chest calibration.
-    // Never derive spatial axes from either wrist or from Root orientation.
-    const Eigen::Matrix3d chest_calibration =
-        rotationFromRpy(Eigen::Vector3d(M_PI / 2.0, 0.0, M_PI / 2.0));
-    const Eigen::Matrix3d rotation =
-        target.body.chest_orientation.toRotationMatrix() * chest_calibration.transpose();
-    const Eigen::Matrix3d anchor_rotation =
-        anchor.chest_orientation.toRotationMatrix() * chest_calibration.transpose();
-    const auto heading = velocity_ik::torsoHeading(rotation, target.body.chest_angular_ff);
-    const auto anchor_heading = velocity_ik::torsoHeading(anchor_rotation);
+    // Both angles were resolved together once in targetCallback. In
+    // particular a pitch crossing 90 degrees must not invert waist heading.
+    const auto& orientation = target.body.torso_orientation;
+    const auto& anchor_orientation = anchor.torso_orientation;
     Eigen::Vector4d delta = session_body_anchor_.accumulated_torso_delta;
     // No horizontal locomotion or hand-error recruitment in fixed-base IK.
     delta(1) += torso_height_gain_ *
         (target.body.chest_position.z() - anchor.chest_position.z());
-    delta(2) += torso_pitch_gain_ * (heading.pitch - anchor_heading.pitch);
-    delta(3) += torso_yaw_gain_ * shortestAngularDelta(anchor_heading.yaw, heading.yaw);
+    delta(2) += torso_pitch_gain_ * (orientation.rpy.y() - anchor_orientation.rpy.y());
+    delta(3) += torso_yaw_gain_ * (orientation.rpy.z() - anchor_orientation.rpy.z());
     intent.desired_torso_feature = session_body_anchor_.robot_torso_feature + delta;
     intent.desired_torso_feature.segment<2>(1) += session_body_anchor_.position_resume_offset;
     intent.desired_torso_velocity <<
         0.0, torso_height_gain_ * target.body.chest_linear_ff.z(),
-        torso_pitch_gain_ * heading.pitch_rate, torso_yaw_gain_ * heading.yaw_rate;
+        torso_pitch_gain_ * orientation.pitch_yaw_rate.x(),
+        torso_yaw_gain_ * orientation.pitch_yaw_rate.y();
     intent.desired_base_translation = session_anchor_.translation;
     intent.desired_base_velocity.setZero();
     intent.torso_valid = true;
@@ -4981,14 +5040,95 @@ class PinocchioVelocityIk {
     return bits;
   }
 
+  // X+B resume matches ik_ros_uni: solve once from a neutral arm seed so the
+  // elbow does not stay in the paused pose's inverted basin, then interpolate
+  // joints from the held posture to that solution.
+  bool solveResumeArmGoalFromNeutral(const TargetSnapshot& target, const DecisionVector& held,
+                                     DecisionVector* goal) {
+    if (!target.arm_target_torso_relative) return false;
+    const auto lower = [&](int i) {
+      return position_lower_[i] + position_limit_margin_ + boundary_brake_guard_;
+    };
+    const auto upper = [&](int i) {
+      return position_upper_[i] - position_limit_margin_ - boundary_brake_guard_;
+    };
+    DecisionVector q = held;
+    for (int a = 0; a < kArmCount; ++a) if (armIsControlled(a))
+      for (int k = 0; k < kJointsPerArm; ++k) {
+        const int i = armDecisionIndex(a, k);
+        q[i] = std::clamp(0.0, lower(i), upper(i));
+      }
+    const DecisionVector neutral = q;
+    constexpr int kIterations = 60;
+    constexpr double kPosture = 0.1;
+    for (int iter = 0; iter < kIterations; ++iter) {
+      setPlantDecisionPositions(q);
+      const auto& torso = plant_->GetFrameByName(torso_frame_name_);
+      std::array<Vector7d, kArmCount> steps;
+      double max_step = 0.;
+      bool finite = true;
+      for (int a = 0; a < kArmCount; ++a) {
+        steps[a].setZero();
+        if (!armIsControlled(a)) continue;
+        const auto& arm_goal = target.arm[a];
+        const auto& hand = hand_frame_names_[a];
+        const auto pose = plant_->GetFrameByName(hand).CalcPose(*plant_context_, torso);
+        const auto jp = selectArmColumns(frameTranslationJacobianRelative(hand, torso_frame_name_), a);
+        const auto jr = selectArmColumns(frameAngularJacobianRelative(hand, torso_frame_name_), a);
+        const Eigen::Vector3d ep = arm_goal.hand_position - pose.translation();
+        const Eigen::Vector3d er = rotationLog(
+            arm_goal.hand_orientation.toRotationMatrix() * pose.rotation().matrix().transpose());
+        const double wr = hand_orientation_weight_ * std::pow(feasibility_characteristic_length_, 2);
+        using M7 = Eigen::Matrix<double, kJointsPerArm, kJointsPerArm>;
+        M7 normal = hand_position_weight_ * jp.transpose() * jp + wr * jr.transpose() * jr;
+        Vector7d rhs = hand_position_weight_ * jp.transpose() * ep + wr * jr.transpose() * er;
+        if (arm_goal.elbow_valid) {
+          const auto& elbow = elbow_frame_names_[a];
+          const auto je = selectArmColumns(frameTranslationJacobianRelative(elbow, torso_frame_name_), a);
+          const Eigen::Vector3d ee = arm_goal.elbow_position -
+              plant_->GetFrameByName(elbow).CalcPose(*plant_context_, torso).translation();
+          const double we = elbowPositionWeight(target, a);
+          normal.noalias() += we * je.transpose() * je;
+          rhs.noalias() += we * je.transpose() * ee;
+        }
+        for (int k = 0; k < kJointsPerArm; ++k) {
+          const int i = armDecisionIndex(a, k);
+          normal(k, k) += kPosture;
+          rhs[k] += kPosture * (neutral[i] - q[i]);
+        }
+        normal.diagonal().array() += .001 * hand_position_weight_;
+        Vector7d step = normal.ldlt().solve(rhs);
+        if (!step.allFinite()) { finite = false; break; }
+        const double scale = std::min(1., .10 / std::max(1e-12, step.cwiseAbs().maxCoeff()));
+        steps[a] = scale * step;
+        max_step = std::max(max_step, steps[a].cwiseAbs().maxCoeff());
+      }
+      if (!finite) {
+        setPlantDecisionPositions(held);
+        return false;
+      }
+      for (int a = 0; a < kArmCount; ++a) if (armIsControlled(a))
+        for (int k = 0; k < kJointsPerArm; ++k) {
+          const int i = armDecisionIndex(a, k);
+          q[i] = std::clamp(q[i] + steps[a][k], lower(i), upper(i));
+        }
+      if (max_step < 1e-4) break;
+    }
+    *goal = q;
+    setPlantDecisionPositions(held);
+    return true;
+  }
+
   // Legacy mode-2 joint interpolation: start at the executing arm reference,
   // keep updating the endpoint, and use one progress value for both arms.
   // Only a new follow operation captures a start; ordinary VR frames do not.
+  // X+B captures the endpoint from a neutral seed instead of the held pose.
   bool beginOrContinueArmEntry(const TargetSnapshot& target, uint64_t base_epoch,
                                bool following, const DecisionVector& q) {
     if (!following) {
       if (entry_active_) entry_key_valid_ = false;
       entry_active_ = false;
+      entry_neutral_seed_ = false;
       return false;
     }
     const std::array<uint64_t,5> key{{target.session_id, target.generation,
@@ -4999,6 +5139,15 @@ class PinocchioVelocityIk {
       entry_active_ = true;
       entry_progress_ = entry_tail_time_ = 0.;
       entry_start_q_ = entry_goal_q_ = q;
+      entry_neutral_seed_ = false;
+      if (arm_only_join_) {
+        if (solveResumeArmGoalFromNeutral(target, q, &entry_goal_q_)) {
+          entry_neutral_seed_ = true;
+          ROS_INFO("[VelocityIk] X+B resume solved the arm target from a neutral seed");
+        } else {
+          ROS_WARN("[VelocityIk] X+B resume kept the held arm seed; neutral solve was rejected");
+        }
+      }
     }
     return entry_active_;
   }
@@ -5021,7 +5170,19 @@ class PinocchioVelocityIk {
     const auto& torso=plant_->GetFrameByName(torso_frame_name_);
     double largest=0.;
     int rows=0;
-    for (int a=0; a<kArmCount; ++a) {
+    // The neutral solution is already the interpolation endpoint. A filtered
+    // hand target still starts at the held pose and would walk that solution
+    // back into elbow flexion.
+    if (entry_neutral_seed_) {
+      for (int a=0; a<kArmCount; ++a) if (armIsControlled(a)) {
+        rows += kJointsPerArm;
+        for (int k=0; k<kJointsPerArm; ++k) {
+          const int i=armDecisionIndex(a,k);
+          largest=std::max(largest,std::abs(entry_goal_q_[i]-entry_start_q_[i]));
+        }
+      }
+    }
+    for (int a=0; a<kArmCount && !entry_neutral_seed_; ++a) {
       if (!armIsControlled(a)) continue;
       const auto& goal=request.target.arm[a];
       const auto& hand=hand_frame_names_[a];
@@ -5038,7 +5199,8 @@ class PinocchioVelocityIk {
         const auto& elbow=elbow_frame_names_[a];
         const auto je=selectArmColumns(frameTranslationJacobianRelative(elbow,torso_frame_name_),a);
         const Eigen::Vector3d ee=goal.elbow_position-plant_->GetFrameByName(elbow).CalcPose(*plant_context_,torso).translation();
-        const double we=elbowPositionWeight(request.target,a)*(1.-smoothStep01((ep.norm()-.05)/.15));
+        const double elbow_scale = 1.-smoothStep01((ep.norm()-.05)/.15);
+        const double we=elbowPositionWeight(request.target,a)*elbow_scale;
         normal.noalias()+=we*je.transpose()*je;
         rhs.noalias()+=we*je.transpose()*ee;
       }
@@ -6226,7 +6388,7 @@ class PinocchioVelocityIk {
           if (!msg || msg->producer_instance != execution_instance_ ||
               msg->q.size() != static_cast<std::size_t>(decisionDofCount()) ||
               msg->dq.size() != msg->q.size() || msg->ddq.size() != msg->q.size()) return;
-          std::lock_guard<std::mutex> lock(data_mutex_);
+          std::lock_guard<velocity_ik::PrioInheritMutex> lock(data_mutex_);
           if (execution_feedback_freshness_.accept(msg->execution_clock_domain,
                   msg->execution_owner_instance, 0, 0, msg->owner_feedback_seq,
                   msg->generated_monotonic_ns, velocity_ik_execution::executionSteadyNs(),
@@ -6253,7 +6415,7 @@ class PinocchioVelocityIk {
         return;
       }
     }
-    std::lock_guard<std::mutex> lock(controller_startup_arm_pose_mutex_);
+    std::lock_guard<velocity_ik::PrioInheritMutex> lock(controller_startup_arm_pose_mutex_);
     if (controller_startup_arm_pose_) {
       if (pose->position != controller_startup_arm_pose_->position)
         ROS_ERROR_THROTTLE(2.0, "[VelocityIk] Controller startup arm pose changed; restart IK to adopt a new endpoint");
@@ -6266,7 +6428,7 @@ class PinocchioVelocityIk {
     if (use_controller_startup_arm_pose_ && !controller_startup_arm_pose_applied_) {
       sensor_msgs::JointState::ConstPtr pose;
       {
-        std::lock_guard<std::mutex> lock(controller_startup_arm_pose_mutex_);
+        std::lock_guard<velocity_ik::PrioInheritMutex> lock(controller_startup_arm_pose_mutex_);
         pose = controller_startup_arm_pose_;
       }
       if (!pose) {
@@ -6320,9 +6482,10 @@ class PinocchioVelocityIk {
     double robot_measurement_age;
     double base_measurement_age;
     double sensor_stamp=0,sensor_receive_ns=0;uint32_t sensor_seq=0;
+    wheel_arm_abs_vel::WholeBodyIkReference::ConstPtr execution_feedback;
     velocity_ik::runtime_probe::point(20);
     {
-      std::lock_guard<std::mutex> lock(data_mutex_);
+      std::lock_guard<velocity_ik::PrioInheritMutex> lock(data_mutex_);
       velocity_ik::runtime_probe::point(21);
       target = target_;
       fixed_prepare_transaction = fixed_prepare_transaction_;
@@ -6346,16 +6509,12 @@ class PinocchioVelocityIk {
           ? base_measurement_freshness_.age(measurement_now_ns)
           : 0.0;
       sensor_stamp=sensor_source_stamp_.toSec();sensor_seq=sensor_source_seq_;sensor_receive_ns=sensor_receive_ns_;
+      execution_feedback = execution_feedback_;
     }
 
     velocity_ik::runtime_probe::point(22);
-    wheel_arm_abs_vel::WholeBodyIkReference::ConstPtr execution_feedback;
     velocity_ik::runtime_probe::point(23);
-    {
-      std::lock_guard<std::mutex> lock(data_mutex_);
-      velocity_ik::runtime_probe::point(24);
-      execution_feedback = execution_feedback_;
-    }
+    velocity_ik::runtime_probe::point(24);
     velocity_ik::runtime_probe::point(25);
     if (enable_takeover_ && execution_feedback &&
         execution_feedback->owner_feedback_seq != execution_feedback_applied_seq_ &&
@@ -6542,7 +6701,7 @@ class PinocchioVelocityIk {
       }
       base_coordinate_jump = false;
       {
-        std::lock_guard<std::mutex> lock(data_mutex_);
+        std::lock_guard<velocity_ik::PrioInheritMutex> lock(data_mutex_);
         base_coordinate_jump_detected_ = false;
       }
       if (!retain_owned_reference) {
@@ -7006,7 +7165,7 @@ class PinocchioVelocityIk {
     const bool unlock_guarded = unlock_owns || unlock_phase_ == UnlockPhase::Joining;
     const bool allow_join_torso = torso_control_allowed && (!unlock_guarded || arm_only_join_);
     const bool direct_entry = ready_follow_guard_ && unlock_phase_ == UnlockPhase::Joining;
-    const bool arm_entry = beginOrContinueArmEntry(target, base_coordinate_epoch,
+    const bool arm_entry = beginOrContinueArmEntry(aligned_torso_target, base_coordinate_epoch,
         (!unlock_enabled_ || direct_entry) && tracking && !manual_override && !target.arm_hold, reference_q_);
     const double entry_progress_before_solve = entry_progress_;
     const double entry_tail_before_solve = entry_tail_time_;
@@ -8015,7 +8174,7 @@ class PinocchioVelocityIk {
       const TargetSnapshot& target, double base_state_age, ShadowState state,
       bool reference_valid, bool emergency_dynamics_used, double task_scale,
       const DecisionVector& ddq) {
-    std::lock_guard<std::mutex> terminal_lock(terminal_publication_mutex_);
+    std::lock_guard<velocity_ik::PrioInheritMutex> terminal_lock(terminal_publication_mutex_);
     if (terminal_stop_requested_.load(std::memory_order_acquire) ||
         !enable_takeover_
 #ifndef VELOCITY_IK_OFFLINE_TEST
@@ -8645,7 +8804,7 @@ class PinocchioVelocityIk {
   velocity_ik::InputContinuity input_continuity_;
   velocity_ik::Acquisition acquisition_;
   std::array<uint64_t,5> entry_key_{};
-  bool entry_key_valid_{false}, entry_active_{false};
+  bool entry_key_valid_{false}, entry_active_{false}, entry_neutral_seed_{false};
   DecisionVector entry_start_q_, entry_goal_q_;
   double entry_progress_{1.}, entry_tail_time_{0.}, entry_duration_{.55}, entry_speed_{1.};
   double acquisition_joint_speed_=.80, acquisition_linear_speed_=.40;
@@ -8664,7 +8823,7 @@ class PinocchioVelocityIk {
   ros::Subscriber target_sub_;
   ros::Subscriber robot_state_sub_;
   ros::Subscriber controller_startup_arm_pose_sub_;
-  std::mutex controller_startup_arm_pose_mutex_;
+  velocity_ik::PrioInheritMutex controller_startup_arm_pose_mutex_;
   sensor_msgs::JointState::ConstPtr controller_startup_arm_pose_;
   bool use_controller_startup_arm_pose_{false};
   bool controller_startup_arm_pose_applied_{false};
@@ -8746,10 +8905,10 @@ class PinocchioVelocityIk {
   double torso_pitch_half_range_{20.0 * M_PI / 180.0};
   double torso_yaw_half_range_{45.0 * M_PI / 180.0};
 
-  std::mutex data_mutex_;
+  velocity_ik::PrioInheritMutex data_mutex_;
   TargetSnapshot target_;
   velocity_ik::FixedPrepareTransaction fixed_prepare_transaction_;
-  std::mutex manual_lower_mutex_;
+  velocity_ik::PrioInheritMutex manual_lower_mutex_;
   velocity_ik::ManualLowerBody manual_lower_;
   ros::ServiceServer manual_lower_service_;
   uint64_t target_sequence_counter_{0};
@@ -8834,7 +8993,7 @@ class PinocchioVelocityIk {
   int candidate_hold_cycles_{0};
   ros::Subscriber terminal_stop_sub_;
   std::atomic<bool> terminal_stop_requested_{false};
-  std::mutex terminal_publication_mutex_;
+  velocity_ik::PrioInheritMutex terminal_publication_mutex_;
   kuavo_reference_shm::RosTransport reference_transport_;
   ros::Subscriber execution_owner_sub_;
   wheel_arm_abs_vel::WholeBodyIkReference::ConstPtr execution_feedback_;

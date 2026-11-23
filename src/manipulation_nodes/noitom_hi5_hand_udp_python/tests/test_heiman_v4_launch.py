@@ -28,7 +28,7 @@ class HeimanLaunchTest(unittest.TestCase):
                 with self.subTest(entry=entry, version=version):
                     config = self.load(entry, version)
                     self.assertTrue(config.params['/wheel_ik'].value)
-                    self.assertEqual(config.params['/end_effector_type'].value, 'heiman')
+                    self.assertNotIn('/end_effector_type', config.params)
                     self.assertEqual(config.params['/control_finger_type'].value, 0)
                     types = [node.type for node in config.nodes]
                     self.assertIn('wheel_ik_ros_uni_cpp_node', types)
@@ -40,19 +40,25 @@ class HeimanLaunchTest(unittest.TestCase):
                 with self.subTest(entry=entry, version=version):
                     config = self.load(entry, version, incremental=False)
                     mapper = next(node for node in config.nodes if node.type == 'ik_ros_uni.py')
-                    self.assertIn('--ee_type heiman', mapper.args.replace('--ee_type=', '--ee_type '))
-                    self.assertEqual(config.params['/end_effector_type'].value, 'heiman')
+                    self.assertNotIn('/end_effector_type', config.params)
+                    self.assertNotIn('heiman', mapper.args)
+                    passed = self.load(entry, version, incremental=False, extra=['ee_type:=heiman'])
+                    passed_mapper = next(node for node in passed.nodes if node.type == 'ik_ros_uni.py')
+                    self.assertIn('--ee_type heiman', passed_mapper.args.replace('--ee_type=', '--ee_type '))
+                    self.assertEqual(passed.params['/end_effector_type'].value, 'heiman')
                     self.assertTrue(config.params['/wheel_ik'].value)
 
     def test_other_hands_and_explicit_overrides_are_preserved(self):
         for entry in ENTRIES:
-            for version, expected in ((210062, 'lejuclaw'), (310062, 'qiangnao')):
+            for version in (210062, 310062):
                 config = self.load(entry, version)
                 self.assertTrue(config.params['/wheel_ik'].value)
-                self.assertEqual(config.params['/end_effector_type'].value, expected)
+                self.assertNotIn('/end_effector_type', config.params)
             for incremental in (False, True):
                 config = self.load(entry, 410062, incremental=incremental, extra=['ee_type:=qiangnao'])
                 self.assertEqual(config.params['/end_effector_type'].value, 'qiangnao')
+            config = self.load(entry, 210062, extra=['ee_type:=lejuclaw'])
+            self.assertEqual(config.params['/end_effector_type'].value, 'lejuclaw')
 
     def test_v4_standard_quest_scales_match_existing_wheel_profile(self):
         for entry in (ENTRIES[0], ENTRIES[2]):
@@ -66,7 +72,7 @@ class HeimanLaunchTest(unittest.TestCase):
     def test_arm_only_ik_keeps_global_hand_parameters(self):
         for version in (410062, 410063):
             config = self.load(ENTRIES[0], version, extra=['use_arm_only_ik:=true'])
-            self.assertEqual(config.params['/end_effector_type'].value, 'heiman')
+            self.assertNotIn('/end_effector_type', config.params)
             self.assertEqual(config.params['/control_finger_type'].value, 0)
             types = [node.type for node in config.nodes]
             self.assertIn('wheel_arm_only_ik_ros_uni_cpp_node', types)
@@ -75,7 +81,7 @@ class HeimanLaunchTest(unittest.TestCase):
     def test_biped_keeps_original_ik_path(self):
         config = self.load(ENTRIES[0], 45)
         self.assertFalse(config.params['/wheel_ik'].value)
-        self.assertEqual(config.params['/end_effector_type'].value, 'qiangnao')
+        self.assertNotIn('/end_effector_type', config.params)
         self.assertIn('ik_ros_uni_cpp_node', [node.type for node in config.nodes])
 
 

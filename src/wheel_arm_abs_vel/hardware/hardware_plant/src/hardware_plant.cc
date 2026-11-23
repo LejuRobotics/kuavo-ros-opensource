@@ -3006,11 +3006,13 @@ bool updateCalibrationStallState(CalibrationStallState& state,
                     }
                     ruiwo_actuator = new motorevo::MotorevoActuator(config_file, cali_arm, control_frequency);
                     
-                    // 检查是否为气泵末端类型（ROBOT_MODULE为LUNBI_V62，且末端类型包含qibeng）
-                    bool qibeng_enabled = robot_module_ == "LUNBI_V62" &&
-                                         std::find(motor_info.end_effector_type.begin(), motor_info.end_effector_type.end(), EndEffectorType::qibeng) != motor_info.end_effector_type.end();
-                    if (qibeng_enabled) {
-                        std::cout << "[HWPlantInit] qibeng end effector detected, enabling arm offset" << std::endl;
+                    // qibeng 与 heiman 使用同一套启动回零姿态（ROBOT_MODULE为LUNBI_V62）。
+                    const auto& end_effector_types = motor_info.end_effector_type;
+                    const bool folded_startup_pose = robot_module_ == "LUNBI_V62" &&
+                        (std::find(end_effector_types.begin(), end_effector_types.end(), EndEffectorType::qibeng) != end_effector_types.end() ||
+                         std::find(end_effector_types.begin(), end_effector_types.end(), EndEffectorType::heiman) != end_effector_types.end());
+                    if (folded_startup_pose) {
+                        std::cout << "[HWPlantInit] qibeng or heiman end effector detected, enabling arm offset" << std::endl;
                     }
                     
                     // 设置电机回零时的目标初始位置。必须在 initialize() 之前设置，因为其内部会调用 moveToZero()。
@@ -3047,15 +3049,14 @@ bool updateCalibrationStallState(CalibrationStallState& state,
                         std::cout << "[HWPlantInit] Calibration mode enabled, motors will return to 0 degrees (no angle adjustment)" << std::endl;
                     }
 
-                    // 如果末端类型为qibeng，为5号和12号电机添加90度偏移，避免与气泵末端干涉
-                    // 启动时候：5号比标准零点-90度偏置，12号比标准零点+90度偏置
-                    if (motorevo_actuator != nullptr && qibeng_enabled && !cali_arm && !customBootArm) {
+                    // qibeng / heiman：启动时 5 号比标准零点 -90 度，12 号 +90 度。
+                    if (motorevo_actuator != nullptr && folded_startup_pose && !cali_arm && !customBootArm) {
                         std::map<motorevo::MotorId, float> target_positions;
                         constexpr float offset_deg_rad = 90.0f * M_PI / 180.0f;
                         target_positions[5] = -offset_deg_rad;
                         target_positions[12] = offset_deg_rad;
                         motorevo_actuator->setInitialTargetPositions(target_positions);
-                        std::cout << "[HWPlantInit] qibeng enabled, set initial target positions: motor 0x05 -> -90 deg, motor 0x0C -> +90 deg" << std::endl;
+                        std::cout << "[HWPlantInit] qibeng or heiman enabled, set initial target positions: motor 0x05 -> -90 deg, motor 0x0C -> +90 deg" << std::endl;
                     }
                 }
                 else {
