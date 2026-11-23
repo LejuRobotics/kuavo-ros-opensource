@@ -290,8 +290,10 @@ namespace wheel_absolute_control
         kuavo_settings_.hardware_settings.driver, lowJointNum_, armNum_, EC_MASTER, RUIWO);
 
     const auto& endEffectorTypes = kuavo_settings_.hardware_settings.end_effector_type;
-    const bool hasQibeng = std::any_of(endEffectorTypes.begin(), endEffectorTypes.end(),
-        [](const auto& eef_type) { return eef_type == EndEffectorType::qibeng; });
+    const bool useFoldedArmPose = std::any_of(endEffectorTypes.begin(), endEffectorTypes.end(),
+        [](const auto& eef_type) {
+          return eef_type == EndEffectorType::qibeng || eef_type == EndEffectorType::heiman;
+        });
     /************** Initialize WBC **********************/
     if (dynamics_backend_name_ == "wbc") {
     wheel_wbc_ = std::make_shared<mobile_manipulator::AbsoluteContactForceWbc>(*pinocchioInterface_ptr_, manipulatorModelInfo_);
@@ -530,9 +532,8 @@ namespace wheel_absolute_control
       mujoco_q[2] = 0.0;
     }
     mujoco_q[3] = 1.0;
-    // 62/63 气泵夹爪版（短版本 patch==0）且硬件标记 hasQibeng 时使用专用初始姿态。
-    if ((rb_version.major() == 6 && rb_version.patch() == 0 &&
-         (rb_version.minor() == 2 || rb_version.minor() == 3)) && hasQibeng)
+    // 末端为 qibeng 或 heiman 时使用同一套初始姿态，不限 62/63 或 400062/410062。
+    if (useFoldedArmPose)
     {
       mujoco_q[11] = 0.5236;
       mujoco_q[14] = -1.57;
@@ -867,6 +868,77 @@ namespace wheel_absolute_control
         lock.unlock();
         refreshLockKneeLegParameter();
         lock.lock();
+      }
+    });
+    stopAsyncTelemetryWorker_.store(false, std::memory_order_relaxed);
+    asyncTelemetryWorker_ = std::thread([this, parameter_background_cpus, have_background_mask] {
+      sched_param policy{};
+      pthread_setschedparam(pthread_self(), SCHED_OTHER, &policy);
+      if (have_background_mask) pthread_setaffinity_np(pthread_self(),
+          sizeof(parameter_background_cpus), &parameter_background_cpus);
+      std_msgs::Float64MultiArray timingMsg;
+      timingMsg.data.resize(12, 0.0);
+      sensor_msgs::JointState filteredMsg;
+      filteredMsg.name.resize(armNum_);
+      filteredMsg.position.resize(armNum_);
+      filteredMsg.velocity.resize(armNum_);
+      for (size_t i = 0; i < armNum_; ++i) {
+        filteredMsg.name[i] = "arm_joint_" + std::to_string(i + 1);
+      }
+      geometry_msgs::PoseStamped fkMsg;
+      fkMsg.header.frame_id = manipulatorModelInfo_.baseFrame;
+      while (!stopAsyncTelemetryWorker_.load(std::memory_order_acquire) ||
+             asyncHandFkRead_.load(std::memory_order_relaxed) != asyncHandFkWrite_.load(std::memory_order_acquire) ||
+             asyncArmTrajRead_.load(std::memory_order_relaxed) != asyncArmTrajWrite_.load(std::memory_order_acquire) ||
+             asyncCmdPrepareRead_.load(std::memory_order_relaxed) != asyncCmdPrepareWrite_.load(std::memory_order_acquire)) {
+        bool didWork = false;
+        while (true) {
+          const size_t r = asyncHandFkRead_.load(std::memory_order_relaxed);
+          if (r == asyncHandFkWrite_.load(std::memory_order_acquire)) break;
+          const AsyncHandFkSample sample = asyncHandFkRing_[r % kAsyncTelemetryCapacity];
+          asyncHandFkRead_.store(r + 1, std::memory_order_release);
+          fkMsg.header.stamp = sample.stamp;
+          const size_t n = std::min(sample.count, handFkPubs_.size());
+          for (size_t i = 0; i < n; ++i) {
+            fkMsg.pose.position.x = sample.poses[i][0];
+            fkMsg.pose.position.y = sample.poses[i][1];
+            fkMsg.pose.position.z = sample.poses[i][2];
+            fkMsg.pose.orientation.x = sample.poses[i][3];
+            fkMsg.pose.orientation.y = sample.poses[i][4];
+            fkMsg.pose.orientation.z = sample.poses[i][5];
+            fkMsg.pose.orientation.w = sample.poses[i][6];
+            try { handFkPubs_[i].publish(fkMsg); } catch (...) {}
+          }
+          didWork = true;
+        }
+        while (true) {
+          const size_t r = asyncCmdPrepareRead_.load(std::memory_order_relaxed);
+          if (r == asyncCmdPrepareWrite_.load(std::memory_order_acquire)) break;
+          const AsyncCmdPrepareSample sample = asyncCmdPrepareRing_[r % kAsyncTelemetryCapacity];
+          asyncCmdPrepareRead_.store(r + 1, std::memory_order_release);
+          std::copy(sample.data.begin(), sample.data.end(), timingMsg.data.begin());
+          try { cmd_prepare_timing_pub_.publish(timingMsg); } catch (...) {}
+          didWork = true;
+        }
+        while (true) {
+          const size_t r = asyncArmTrajRead_.load(std::memory_order_relaxed);
+          if (r == asyncArmTrajWrite_.load(std::memory_order_acquire)) break;
+          const AsyncArmTrajSample sample = asyncArmTrajRing_[r % kAsyncTelemetryCapacity];
+          asyncArmTrajRead_.store(r + 1, std::memory_order_release);
+          if (armTrajFilteredPub_) {
+            filteredMsg.header.stamp = sample.stamp;
+            const size_t n = std::min(sample.count, filteredMsg.position.size());
+            for (size_t i = 0; i < n; ++i) {
+              filteredMsg.position[i] = sample.pos_deg[i];
+              filteredMsg.velocity[i] = sample.vel_deg[i];
+            }
+            try { armTrajFilteredPub_.publish(filteredMsg); } catch (...) {}
+          }
+          didWork = true;
+        }
+        if (!didWork) {
+          std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        }
       }
     });
     return true;
@@ -1846,7 +1918,16 @@ namespace wheel_absolute_control
     cmd_prepare_timing_.data[9] = cmd_prepare_timing_.data[10] =
         lock_parameter_query_ms_.load(std::memory_order_relaxed);
     cmd_prepare_timing_.data[11] = lock_parameter_peak_ms_.load(std::memory_order_relaxed);
-    cmd_prepare_timing_pub_.publish(cmd_prepare_timing_);
+    {
+      const size_t w = asyncCmdPrepareWrite_.load(std::memory_order_relaxed);
+      if (w - asyncCmdPrepareRead_.load(std::memory_order_acquire) < kAsyncTelemetryCapacity) {
+        AsyncCmdPrepareSample& slot = asyncCmdPrepareRing_[w % kAsyncTelemetryCapacity];
+        for (size_t k = 0; k < 12 && k < cmd_prepare_timing_.data.size(); ++k) {
+          slot.data[k] = cmd_prepare_timing_.data[k];
+        }
+        asyncCmdPrepareWrite_.store(w + 1, std::memory_order_release);
+      }
+    }
     if (!dynamics_ok) return;
     // Observation only, after the final atomic reference/soft-pause checks.
     vector_t ik_timing(13);
@@ -1929,29 +2010,27 @@ namespace wheel_absolute_control
       }
     }
 
-    // 发布滤波后手臂轨迹（JointState 格式, deg），用于互相关测量相位延迟
-    // 对比 /vr_incremental/kuavo_arm_traj_shm（滤波前）与此话题（滤波后）即可得到纯相位延迟
+    // 发布滤波后手臂轨迹（JointState 格式, deg），通过无锁 SPSC 队列交由后台 SCHED_OTHER 线程发布
     if (armTrajFilteredPub_) {
-        sensor_msgs::JointState filteredMsg;
-        filteredMsg.header.stamp = time;
-        filteredMsg.position.resize(armNum_);
-        filteredMsg.velocity.resize(armNum_);
-        filteredMsg.name.resize(armNum_);
-        for (int i = 0; i < armNum_; ++i) {
-            filteredMsg.name[i] = "arm_joint_" + std::to_string(i + 1);
-            filteredMsg.position[i] = optimizedState_mrt_limit_.tail(armNum_)[i] * 180.0 / M_PI;
-            filteredMsg.velocity[i] = optimizedInput_mrt_limit_.tail(armNum_)[i] * 180.0 / M_PI;
+        const size_t w = asyncArmTrajWrite_.load(std::memory_order_relaxed);
+        if (w - asyncArmTrajRead_.load(std::memory_order_acquire) < kAsyncTelemetryCapacity) {
+            AsyncArmTrajSample& slot = asyncArmTrajRing_[w % kAsyncTelemetryCapacity];
+            slot.stamp = time;
+            slot.count = std::min<size_t>(armNum_, slot.pos_deg.size());
+            for (size_t i = 0; i < slot.count; ++i) {
+                slot.pos_deg[i] = optimizedState_mrt_limit_.tail(armNum_)[i] * 180.0 / M_PI;
+                slot.vel_deg[i] = optimizedInput_mrt_limit_.tail(armNum_)[i] * 180.0 / M_PI;
+            }
+            asyncArmTrajWrite_.store(w + 1, std::memory_order_release);
         }
-        armTrajFilteredPub_.publish(filteredMsg);
     }
+
+    // 优先更新共享内存中的关节命令，避免被 roscpp 发布锁阻塞
+    control_data_manager_->publishJointCmdToShm(jointCmdMsg);
 
     const double cmd_publish_begin=kuavo_e2e::ns();
     jointCmdPub_.publish(jointCmdMsg);
     if(commandAudit.enabled()) {kuavo_e2e::Trace<64>::Row row{};row[0]=1;row[1]=jointCmdMsg.header.stamp.toSec();row[2]=cmd_publish_begin;row[3]=kuavo_e2e::ns();row[4]=wholeBodyIkReference.session_id;row[5]=wholeBodyIkReference.generation;row[6]=wholeBodyIkReference.reference_seq;row[7]=wholeBodyAccelerationFeedforwardApplied ? 1.0 : 0.0;row[8]=arm_ddq_feedforward_gain_;row[9]=commandAudit.dropped();for(int j=0;j<18;++j){row[16+j]=wholeBodyIkReference.ddq.size()==21?wholeBodyIkReference.ddq[j+3]:0;row[34+j]=torque[j];}commandAudit.push(row);}
-
-
-    //更新共享内存中的关节命令
-    control_data_manager_->publishJointCmdToShm(jointCmdMsg);
 
     {
       const double updateCostMs =
@@ -2016,7 +2095,12 @@ namespace wheel_absolute_control
       velCmdMsg = humanoidController_wheel_wbc::applyMobileBaseLock(velCmdMsg, base_locked_);
       const bool stopped = velCmdMsg.linear.x == 0.0 &&
                            velCmdMsg.linear.y == 0.0 && velCmdMsg.angular.z == 0.0;
-      if (base_locked_ || stopped || last_cmd_vel_pub_time_ == std::chrono::steady_clock::time_point{} ||
+      const bool immediate_lock_or_stop =
+          (base_locked_ && !last_cmd_vel_was_locked_) ||
+          (stopped && !last_cmd_vel_was_stopped_);
+      last_cmd_vel_was_locked_ = base_locked_;
+      last_cmd_vel_was_stopped_ = stopped;
+      if (immediate_lock_or_stop || last_cmd_vel_pub_time_ == std::chrono::steady_clock::time_point{} ||
           std::chrono::duration<double>(updateWallStart - last_cmd_vel_pub_time_).count() >= 1.0 / base_cmd_vel_publish_rate_) {
         cmdVelPub_.publish(velCmdMsg);
         last_cmd_vel_pub_time_ = updateWallStart;
@@ -2070,6 +2154,8 @@ namespace wheel_absolute_control
     }
     lockParameterWake_.notify_one();
     if (lockParameterWorker_.joinable()) lockParameterWorker_.join();
+    stopAsyncTelemetryWorker_.store(true, std::memory_order_release);
+    if (asyncTelemetryWorker_.joinable()) asyncTelemetryWorker_.join();
     // The nodelet has joined the control loop. Drop subscriptions and worker
     // publishers while their nodelet callback queues still exist.
     control_data_manager_.reset();
@@ -2482,6 +2568,14 @@ namespace wheel_absolute_control
     const pinocchio::SE3 basePose = data.oMf[baseFrameId];
     const ros::Time stamp = ros::Time::now();
 
+    const size_t w = asyncHandFkWrite_.load(std::memory_order_relaxed);
+    const bool canEnqueue =
+        manipulatorModelInfo_.eeFrames.size() <= 4 &&
+        (w - asyncHandFkRead_.load(std::memory_order_acquire) < kAsyncTelemetryCapacity);
+    AsyncHandFkSample sample;
+    sample.stamp = stamp;
+    sample.count = std::min<size_t>(manipulatorModelInfo_.eeFrames.size(), 4);
+
     for (size_t i = 0; i < manipulatorModelInfo_.eeFrames.size(); ++i)
     {
       const auto& eeFrame = manipulatorModelInfo_.eeFrames[i];
@@ -2492,19 +2586,15 @@ namespace wheel_absolute_control
       }
       // 末端在 base_link 系下的位姿
       const pinocchio::SE3 eeInBase = basePose.inverse() * data.oMf[eeFrameId];
-
-      geometry_msgs::PoseStamped msg;
-      msg.header.stamp = stamp;
-      msg.header.frame_id = manipulatorModelInfo_.baseFrame;
-      msg.pose.position.x = eeInBase.translation()[0];
-      msg.pose.position.y = eeInBase.translation()[1];
-      msg.pose.position.z = eeInBase.translation()[2];
       const Eigen::Quaterniond q(eeInBase.rotation());
-      msg.pose.orientation.x = q.x();
-      msg.pose.orientation.y = q.y();
-      msg.pose.orientation.z = q.z();
-      msg.pose.orientation.w = q.w();
-      handFkPubs_[i].publish(msg);
+      if (canEnqueue) {
+        sample.poses[i] = {{eeInBase.translation()[0], eeInBase.translation()[1], eeInBase.translation()[2],
+                            q.x(), q.y(), q.z(), q.w()}};
+      }
+    }
+    if (canEnqueue) {
+      asyncHandFkRing_[w % kAsyncTelemetryCapacity] = sample;
+      asyncHandFkWrite_.store(w + 1, std::memory_order_release);
     }
   }
 

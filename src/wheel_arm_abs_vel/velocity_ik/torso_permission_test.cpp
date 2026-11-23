@@ -182,6 +182,91 @@ struct VelocityIkOfflineTest {
    p.position.x=pose.translation().x();p.position.y=pose.translation().y();p.position.z=pose.translation().z();
    const Eigen::Quaterniond q(pose.rotation().matrix());p.orientation.x=q.x();p.orientation.y=q.y();p.orientation.z=q.z();p.orientation.w=q.w();
   }
+  if (scenario=="torso_orientation") {
+    constexpr double deg=M_PI/180.;
+    m->torso_control_enabled=true;
+    n.session_anchor_.valid=true;
+    int frame=0;
+    auto observe=[&](double roll,double pitch,double yaw) {
+      const Eigen::Quaterniond chest=
+          Eigen::AngleAxisd(yaw,Eigen::Vector3d::UnitZ()) *
+          Eigen::AngleAxisd(pitch,Eigen::Vector3d::UnitY()) *
+          Eigen::AngleAxisd(roll,Eigen::Vector3d::UnitX()) * rot;
+      m->chest_pose.orientation=n.toPose(Eigen::Vector3d::Zero(),chest).orientation;
+      m->header.seq=++frame;m->header.stamp.fromSec(100.+frame*.01);
+      m->mapper_publish_stamp=ros::Time::now();
+      // Acquisition-time estimates may jitter backwards even for a newer
+      // source stamp. They must not discard a valid orientation observation.
+      m->source_relative_age=frame%2?.001:0.;
+      n.targetCallback(m);
+      require(n.target_.valid,"orientation callback rejected a valid source frame");
+    };
+    for(double roll:{0.,15.*deg,-20.*deg}) {
+      ++m->body_coordinate_epoch;
+      observe(roll,0.,179.*deg);
+      require(n.captureSessionBodyAnchor(n.target_,n.reference_q_,false),"orientation anchor capture failed");
+      const auto robot_anchor=n.session_body_anchor_.robot_torso_feature;
+      const auto human_anchor=n.session_body_anchor_.human.torso_orientation.rpy;
+      for(int i=0;i<=2400;++i) {
+        const double pitch=(i<=1200?i:2400-i)*.1*deg;
+        observe(roll,pitch,179.*deg);
+        const auto intent=n.calculateBodyIntent(n.target_);
+        require(intent.torso_valid,"continuous torso intent became invalid");
+        require(std::abs(intent.desired_torso_feature(3)-robot_anchor(3))<1e-8,
+                "pure bow commanded waist yaw");
+        require(std::abs(intent.desired_torso_feature(2)-robot_anchor(2)-n.torso_pitch_gain_*pitch)<1e-8,
+                "pitch folded back across 90 degrees");
+        require(intent.desired_torso_velocity.allFinite(),"singular torso feedforward");
+        require((n.session_body_anchor_.human.torso_orientation.rpy-human_anchor).norm()<1e-12,
+                "orientation continuation moved the fixed human anchor");
+        const auto repeated=n.calculateBodyIntent(n.target_);
+        require((repeated.desired_torso_feature-intent.desired_torso_feature).norm()<1e-12,
+                "repeated solver read advanced the orientation state");
+      }
+      for(int i=0;i<=1100;++i)observe(roll,i*.1*deg,179.*deg);
+      for(int i=1;i<=600;++i)observe(roll,110.*deg,(179.+i*.1)*deg);
+      const auto turned=n.calculateBodyIntent(n.target_);
+      require(std::abs(turned.desired_torso_feature(3)-robot_anchor(3)-n.torso_yaw_gain_*60.*deg)<1e-8,
+              "turning while bent or crossing yaw wrap lost its absolute gain");
+      const auto before=n.target_.body.torso_orientation;
+      m->arm_hold=true;++m->arm_operation_seq;
+      n.targetCallback(m);  // A same-stamp X+B packet is authority, not a new pose.
+      require(n.target_.arm_hold,"X+B operation was rejected");
+      require(n.target_.body.torso_orientation.source_time==before.source_time &&
+              (n.target_.body.torso_orientation.rpy-before.rpy).norm()<1e-12,
+              "lifecycle-only packet advanced orientation history");
+      m->chest_valid=false;
+      m->header.seq=++frame;m->header.stamp.fromSec(100.+frame*.01);
+      m->mapper_publish_stamp=ros::Time::now();
+      n.targetCallback(m);
+      require(n.target_.body.torso_orientation.source_time==before.source_time,
+              "cached invalid-body frame renewed orientation history");
+      m->chest_valid=true;
+      m->control_valid=false;
+      m->header.seq=++frame;m->header.stamp.fromSec(100.+frame*.01);
+      n.targetCallback(m);
+      require(!n.target_.valid &&
+              n.target_.body.torso_orientation.source_time==before.source_time,
+              "invalid contract renewed or discarded the orientation branch");
+      m->control_valid=true;
+      ++m->generation;m->arm_hold=false;++m->arm_operation_seq;
+      observe(roll,110.*deg,239.*deg);
+      require((n.target_.body.torso_orientation.rpy-before.rpy).norm()<1e-8,
+              "generation change inverted the retained orientation branch");
+      require(n.captureSessionBodyAnchor(n.target_,n.reference_q_,false),"X+A-style recapture failed");
+      const auto recaptured=n.calculateBodyIntent(n.target_);
+      require((recaptured.desired_torso_feature-n.session_body_anchor_.robot_torso_feature).norm()<1e-8,
+              "new absolute anchor retained old motion");
+    }
+    ++m->body_coordinate_epoch;
+    observe(0.,0.,-30.*deg);
+    require(std::abs(n.target_.body.torso_orientation.rpy.z()+30.*deg)<1e-8 &&
+            n.target_.body.torso_orientation.pitch_yaw_rate.norm()<1e-8,
+            "new coordinate epoch retained old orientation history");
+    std::cout<<"PASS production callback/absolute torso intent: deep bow, side lean, "
+             <<"turning, fixed anchor, repeated reads, X+B/generation and coordinate reset\n";
+    return;
+  }
   int tick=0;
   bool publish_target=true;
   auto step=[&]{

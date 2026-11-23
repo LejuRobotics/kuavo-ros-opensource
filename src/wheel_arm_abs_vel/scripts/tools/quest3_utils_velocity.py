@@ -23,6 +23,7 @@ from geometry_msgs.msg import TransformStamped,Twist
 from tf2_msgs.msg import TFMessage
 from constanst import gesture_corresponding_hand_position
 from pose_velocity_kalman import SkeletonCV, mapped_rates, _NATIVE
+from quest_skeleton_jump import QuestSkeletonJumpCorrection
 # to dev
 hand_thumb_pub = rospy.Publisher('/hand_thumb', Float32MultiArray, queue_size=10)
 
@@ -135,6 +136,8 @@ class Quest3ArmInfoTransformer:
             hand_q_r=rospy.get_param("~vr_kalman_hand_rotation_q", .45),
             chest_sample_hold_seconds=rospy.get_param("~vr_kalman_chest_sample_hold_seconds", 0.),
             position_sample_hold_seconds=rospy.get_param("~vr_kalman_position_sample_hold_seconds", 0.))
+        self.quest_skeleton_jump = (QuestSkeletonJumpCorrection()
+                                    if rospy.get_param("~quest_skeleton_jump_correction_enabled", False) else None)
         self.skeleton_contract = None
         self.estimated_bones = {}
         self.tcp_estimated_rates = {}
@@ -805,6 +808,7 @@ class Quest3ArmInfoTransformer:
         self.is_hand_tracking = msg.is_hand_tracking
         runtime_probe.point(100)
         transforms = {}
+        measurements = transforms
         if self.skeleton_filter_enabled and accept_hands:
             # Keep beta source admission and optical startup gates. A partial
             # skeleton cannot update the coupled geometry estimator.
@@ -826,16 +830,24 @@ class Quest3ArmInfoTransformer:
                         and estimator.chest_rotation_stamp < estimator.stamp
                         and 0. < stamp-estimator.stamp <= estimator.max_gap):
                     previous_prediction = (estimator.states[23], estimator.chest_rotation_measurement)
-                self.estimated_bones = estimator.update(transforms, stamp, key)
+                measurements = transforms
+                if self.quest_skeleton_jump is not None:
+                    if estimator.key != key:
+                        self.quest_skeleton_jump.reset()
+                    if not msg.is_hand_tracking:
+                        measurements = self.quest_skeleton_jump.update(transforms, stamp, key)
+                        if self.quest_skeleton_jump.rebased:
+                            previous_prediction = None
+                self.estimated_bones = estimator.update(measurements, stamp, key)
                 if previous_prediction is not None and estimator.chest_rotation_stamp == stamp:
                     self.arm_chest_for_frame = self._arm_chest_on_reversal(
-                        *previous_prediction, transforms[23][:3, :3])
+                        *previous_prediction, measurements[23][:3, :3])
             except (ValueError, np.linalg.LinAlgError):
                 return False
         runtime_probe.point(102)
         if accept_hands:
             if self.arm_shoulder_reference:
-                self.arm_chest_for_frame = self._shoulder_reference(transforms)
+                self.arm_chest_for_frame = self._shoulder_reference(measurements)
             # print("is_high_confidence: {}, is_hand_tracking: {}".format(self.is_high_confidence, self.is_hand_tracking))
             if self.is_hand_tracking:
                 self.compute_finger_joints("Left")

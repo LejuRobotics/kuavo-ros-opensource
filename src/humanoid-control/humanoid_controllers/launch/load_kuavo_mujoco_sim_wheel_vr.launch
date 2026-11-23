@@ -5,7 +5,7 @@
     <arg name="control_torso" default="true"/>  <!-- 启用躯干控制 -->
     <arg name="ctrl_arm_idx" default="2"/>
     <arg name="predict_gesture" default="false"/>
-    <arg name="ee_type" default="qiangnao"/>
+    <arg name="ee_type" default=""/>
     <arg name="head_control_mode" default="" doc="留空时头控使用 fixed；可指定 fixed / vr_follow / track_hand。VR 启动仅在当前 fixed 时自动切换"/>
     <arg name="head_track_target" default="both_hands_midpoint" doc="head_control_mode:=track_hand 时：both_hands_midpoint / left_hand / right_hand / active_hand"/>
     <!-- 头部指令由 head_control_node 发布 -->

@@ -42,6 +42,7 @@ struct VelocityIkOfflineTest {
     t.body.chest_valid = true; t.body.coordinate_epoch = 1;
     const auto calibration = n.rotationFromRpy(Eigen::Vector3d(M_PI/2.,0.,M_PI/2.));
     t.body.chest_orientation = Eigen::Quaterniond(calibration);
+    t.body.torso_orientation.update(Eigen::Matrix3d::Identity(),100.);
     t.body.chest_position = Eigen::Vector3d(0.,0.,1.3);
     for (auto& arm : t.arm) arm.hand_orientation = Eigen::Quaterniond::Identity();
     tick(n,t);
@@ -50,9 +51,16 @@ struct VelocityIkOfflineTest {
     t.body.chest_position.z() += .12;
     t.body.chest_orientation = Eigen::Quaterniond(
         n.rotationFromRpy(Eigen::Vector3d(0.,.18,.12))*calibration);
+    // This fixture bypasses targetCallback; provide the same resolved body
+    // observation that the callback attaches to a newly accepted VR frame.
+    t.body.torso_orientation.update(
+        t.body.chest_orientation.toRotationMatrix()*calibration.transpose(),100.01);
     const auto expected = n.calculateBodyIntent(t).desired_torso_feature;
     require(std::abs(expected(1)-original_anchor.robot_torso_feature(1))>.01,
         "fixture does not exercise changed human pose");
+    require(std::abs(expected(2)-original_anchor.robot_torso_feature(2)-.18*n.torso_pitch_gain_)<1e-12 &&
+            std::abs(expected(3)-original_anchor.robot_torso_feature(3)-.12*n.torso_yaw_gain_)<1e-12,
+        "fixture lost absolute pitch/yaw motion");
     t.control_state = Msg::CONTROL_HOLD; t.valid = false; ++t.generation;
     tick(n,t);
     if (scenario == "prepare") {
