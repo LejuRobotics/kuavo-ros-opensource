@@ -40,6 +40,27 @@ model_information {
     [32] "r_ringPIP"
     [33] "r_littleMCP"
     [34] "r_littlePIP"
+    ; Keep the two-finger claw joints out of the arm planning model.
+    [35] "l_f_bar_1_joint"
+    [36] "l_f_bar_2_joint"
+    [37] "l_f_bar_3_joint"
+    [38] "l_f_finger_joint"
+    [39] "l_f_bar_4_joint"
+    [40] "l_b_bar_1_joint"
+    [41] "l_b_bar_2_joint"
+    [42] "l_b_bar_3_joint"
+    [43] "l_b_finger_joint"
+    [44] "l_b_bar_4_joint"
+    [45] "r_f_bar_1_joint"
+    [46] "r_f_bar_2_joint"
+    [47] "r_f_bar_3_joint"
+    [48] "r_f_finger_joint"
+    [49] "r_f_bar_4_joint"
+    [50] "r_b_bar_1_joint"
+    [51] "r_b_bar_2_joint"
+    [52] "r_b_bar_3_joint"
+    [53] "r_b_finger_joint"
+    [54] "r_b_bar_4_joint"
   }
   waistDof                   1   ; number of DOFs of the waist joint (0 if no waist joint)
   ; base frame of the robot (from URDF)

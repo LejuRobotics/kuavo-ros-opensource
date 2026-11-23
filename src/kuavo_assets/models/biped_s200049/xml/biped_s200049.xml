@@ -196,15 +196,15 @@
                       <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="0.752941 0.752941 0.752941 1" mesh="l_f_bar_1"/>
                       <body name="l_f_bar_2" pos="0.011329 0 0.0063767">
                         <inertial pos="0.00572825 0.00048514 -0.00660963" mass="0.00572391" fullinertia="2.50120e-07 3.03179e-07 2.74243e-07 0 -1.22212e-07 0"/>
-                        <joint name="l_f_bar_2" pos="0 0 0" axis="0 1 0" range="-0.698 0.698" damping="0.001" armature="0.001" limited="true"/>
+                        <joint name="l_f_bar_2_joint" pos="0 0 0" axis="0 1 0" range="-0.698 0.698" damping="0.001" armature="0.001" limited="true"/>
                         <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="0.752941 0.752941 0.752941 1" mesh="l_f_bar_2"/>
                         <body name="l_f_bar_3" pos="0.016204 0 -0.014934">
                           <inertial pos="-0.00113845 0.00024321 -0.02191846" mass="0.01141717" fullinertia="2.64607e-06 2.35911e-06 5.84667e-07 0 3.78868e-07 0"/>
-                          <joint name="l_f_bar_3" pos="0 0 0" axis="0 1 0" range="-0.698 0.698" damping="0.001" armature="0.001" limited="true"/>
+                          <joint name="l_f_bar_3_joint" pos="0 0 0" axis="0 1 0" range="-0.698 0.698" damping="0.001" armature="0.001" limited="true"/>
                           <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="0.752941 0.752941 0.752941 1" mesh="l_f_bar_3"/>
                           <body name="l_f_fingers" pos="-0.0081591 0 -0.047301">
                             <inertial pos="-0.01204579 -0.00021404 -0.02486559" mass="0.02893691" fullinertia="4.40627e-06 4.62894e-06 2.10330e-06 2.40e-09 1.67485e-06 8.65e-09"/>
-                            <joint name="l_f_fingers" pos="0 0 0" axis="0 1 0" range="-0.698 0.698" damping="0.001" armature="0.001" limited="true"/>
+                            <joint name="l_f_finger_joint" pos="0 0 0" axis="0 1 0" range="-0.698 0.698" damping="0.001" armature="0.001" limited="true"/>
                             <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="0.752941 0.752941 0.752941 1" mesh="l_f_fingers"/>
                             <body name="l_f_fingers_end" pos="-0.0105 0 0.002"></body>
                           </body>
@@ -219,19 +219,19 @@
                     </body>
                     <body name="l_b_bar_1" pos="-0.0125 -0.000499697 -0.104137">
                       <inertial pos="-0.00322753 0.00085425 0.00181672" mass="0.00325067" fullinertia="5.89275e-08 6.20573e-08 8.11618e-08 0 -1.83197e-08 0"/>
-                      <joint name="l_b_bar_1" pos="0 0 0" axis="0 -1 0" range="-0.698 0.698" damping="0.001" armature="0.001" limited="true"/>
+                      <joint name="l_b_bar_1_joint" pos="0 0 0" axis="0 -1 0" range="-0.698 0.698" damping="0.001" armature="0.001" limited="true"/>
                       <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="0.752941 0.752941 0.752941 1" mesh="l_b_bar_1"/>
                       <body name="l_b_bar_2" pos="-0.011329 0 0.0063767">
                         <inertial pos="-0.00572824 0.00048514 -0.00660962" mass="0.00572391" fullinertia="2.50119e-07 3.03179e-07 2.74243e-07 0 1.22212e-07 0"/>
-                        <joint name="l_b_bar_2" pos="0 0 0" axis="0 -1 0" range="-0.698 0.698" damping="0.001" armature="0.001" limited="true"/>
+                        <joint name="l_b_bar_2_joint" pos="0 0 0" axis="0 -1 0" range="-0.698 0.698" damping="0.001" armature="0.001" limited="true"/>
                         <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="0.752941 0.752941 0.752941 1" mesh="l_b_bar_2"/>
                         <body name="l_b_bar_3" pos="-0.016204 0 -0.014934">
                           <inertial pos="0.00113844 0.00024323 -0.02191846" mass="0.01141717" fullinertia="2.64607e-06 2.35911e-06 5.84667e-07 0 -3.78867e-07 0"/>
-                          <joint name="l_b_bar_3" pos="0 0 0" axis="0 -1 0" range="-0.698 0.698" damping="0.001" armature="0.001" limited="true"/>
+                          <joint name="l_b_bar_3_joint" pos="0 0 0" axis="0 -1 0" range="-0.698 0.698" damping="0.001" armature="0.001" limited="true"/>
                           <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="0.752941 0.752941 0.752941 1" mesh="l_b_bar_3"/>
                           <body name="l_b_fingers" pos="0.0081591 0 -0.047301">
                             <inertial pos="0.01202362 -0.00027072 -0.02480241" mass="0.02893684" fullinertia="4.40789e-06 4.62893e-06 2.10167e-06 3.19e-09 -1.67281e-06 -8.38e-09"/>
-                            <joint name="l_b_fingers" pos="0 0 0" axis="0 -1 0" range="-0.698 0.698" damping="0.001" armature="0.001" limited="true"/>
+                            <joint name="l_b_finger_joint" pos="0 0 0" axis="0 -1 0" range="-0.698 0.698" damping="0.001" armature="0.001" limited="true"/>
                             <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="0.752941 0.752941 0.752941 1" mesh="l_b_fingers"/>
                             <body name="l_b_fingers_end" pos="0.0105 0 0.002"></body>
                           </body>
@@ -293,15 +293,15 @@
                       <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="0.752941 0.752941 0.752941 1" mesh="r_f_bar_1"/>
                       <body name="r_f_bar_2" pos="0.011329 0 0.0063767">
                         <inertial pos="0.00572825 0.00048514 -0.00660963" mass="0.00572391" fullinertia="2.50120e-07 3.03179e-07 2.74243e-07 0 -1.22212e-07 0"/>
-                        <joint name="r_f_bar_2" pos="0 0 0" axis="0 1 0" range="-0.698 0.698" damping="0.001" armature="0.001" limited="true"/>
+                        <joint name="r_f_bar_2_joint" pos="0 0 0" axis="0 1 0" range="-0.698 0.698" damping="0.001" armature="0.001" limited="true"/>
                         <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="0.752941 0.752941 0.752941 1" mesh="r_f_bar_2"/>
                         <body name="r_f_bar_3" pos="0.016204 0 -0.014934">
                           <inertial pos="-0.00113845 0.00024321 -0.02191846" mass="0.01141717" fullinertia="2.64607e-06 2.35911e-06 5.84667e-07 0 3.78868e-07 0"/>
-                          <joint name="r_f_bar_3" pos="0 0 0" axis="0 1 0" range="-0.698 0.698" damping="0.001" armature="0.001" limited="true"/>
+                          <joint name="r_f_bar_3_joint" pos="0 0 0" axis="0 1 0" range="-0.698 0.698" damping="0.001" armature="0.001" limited="true"/>
                           <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="0.752941 0.752941 0.752941 1" mesh="r_f_bar_3"/>
                           <body name="r_f_fingers" pos="-0.0081591 0 -0.047301">
                             <inertial pos="-0.01204579 -0.00021404 -0.02486559" mass="0.02893691" fullinertia="4.40627e-06 4.62894e-06 2.10330e-06 2.40e-09 1.67485e-06 8.65e-09"/>
-                            <joint name="r_f_fingers" pos="0 0 0" axis="0 1 0" range="-0.698 0.698" damping="0.001" armature="0.001" limited="true"/>
+                            <joint name="r_f_finger_joint" pos="0 0 0" axis="0 1 0" range="-0.698 0.698" damping="0.001" armature="0.001" limited="true"/>
                             <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="0.752941 0.752941 0.752941 1" mesh="r_f_fingers"/>
                             <body name="r_f_fingers_end" pos="-0.0105 0 0.002"></body>
                           </body>
@@ -316,19 +316,19 @@
                     </body>
                     <body name="r_b_bar_1" pos="-0.0125 0.000499697 -0.104137">
                       <inertial pos="-0.00322753 0.00085425 0.00181672" mass="0.00325067" fullinertia="5.89275e-08 6.20573e-08 8.11618e-08 0 -1.83197e-08 0"/>
-                      <joint name="r_b_bar_1" pos="0 0 0" axis="0 -1 0" range="-0.698 0.698" damping="0.001" armature="0.001" limited="true"/>
+                      <joint name="r_b_bar_1_joint" pos="0 0 0" axis="0 -1 0" range="-0.698 0.698" damping="0.001" armature="0.001" limited="true"/>
                       <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="0.752941 0.752941 0.752941 1" mesh="r_b_bar_1"/>
                       <body name="r_b_bar_2" pos="-0.011329 0 0.0063767">
                         <inertial pos="-0.00572824 0.00048514 -0.00660962" mass="0.00572391" fullinertia="2.50119e-07 3.03179e-07 2.74243e-07 0 1.22212e-07 0"/>
-                        <joint name="r_b_bar_2" pos="0 0 0" axis="0 -1 0" range="-0.698 0.698" damping="0.001" armature="0.001" limited="true"/>
+                        <joint name="r_b_bar_2_joint" pos="0 0 0" axis="0 -1 0" range="-0.698 0.698" damping="0.001" armature="0.001" limited="true"/>
                         <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="0.752941 0.752941 0.752941 1" mesh="r_b_bar_2"/>
                         <body name="r_b_bar_3" pos="-0.016204 0 -0.014934">
                           <inertial pos="0.00113844 0.00024323 -0.02191846" mass="0.01141717" fullinertia="2.64607e-06 2.35911e-06 5.84667e-07 0 -3.78867e-07 0"/>
-                          <joint name="r_b_bar_3" pos="0 0 0" axis="0 -1 0" range="-0.698 0.698" damping="0.001" armature="0.001" limited="true"/>
+                          <joint name="r_b_bar_3_joint" pos="0 0 0" axis="0 -1 0" range="-0.698 0.698" damping="0.001" armature="0.001" limited="true"/>
                           <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="0.752941 0.752941 0.752941 1" mesh="r_b_bar_3"/>
                           <body name="r_b_fingers" pos="0.0081591 0 -0.047301">
                             <inertial pos="0.01202362 -0.00027072 -0.02480241" mass="0.02893684" fullinertia="4.40789e-06 4.62893e-06 2.10167e-06 3.19e-09 -1.67281e-06 -8.38e-09"/>
-                            <joint name="r_b_fingers" pos="0 0 0" axis="0 -1 0" range="-0.698 0.698" damping="0.001" armature="0.001" limited="true"/>
+                            <joint name="r_b_finger_joint" pos="0 0 0" axis="0 -1 0" range="-0.698 0.698" damping="0.001" armature="0.001" limited="true"/>
                             <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="0.752941 0.752941 0.752941 1" mesh="r_b_fingers"/>
                             <body name="r_b_fingers_end" pos="0.0105 0 0.002"></body>
                           </body>
@@ -413,30 +413,30 @@
     <weld name="c3" body1="r_f_fingers_end" body2="r_f_bar_4_end" torquescale="0" solref="1e-4 1" solimp=".9999 .9999 .01"/>
     <weld name="c4" body1="r_b_fingers_end" body2="r_b_bar_4_end" torquescale="0" solref="1e-4 1" solimp=".9999 .9999 .01"/>
 
-    <joint joint1="l_f_bar_1_joint" joint2="l_b_bar_1" polycoef="0 1 0 0 0" solref="1e-4 1" solimp=".99 .99 .01"/>
-    <joint joint1="l_f_bar_1_joint" joint2="l_f_bar_2" polycoef="0 1 0 0 0" solref="1e-2 1" solimp=".99 .99 .01"/>
-    <joint joint1="l_f_bar_1_joint" joint2="l_f_bar_3" polycoef="0 1 0 0 0" solref="1e-2 1" solimp=".99 .99 .01"/>
-    <joint joint1="l_f_bar_1_joint" joint2="l_f_fingers" polycoef="0 -1 0 0 0" solref="1e-2 1" solimp=".99 .99 .01"/>
-    <joint joint1="l_b_bar_1" joint2="l_b_bar_2" polycoef="0 1 0 0 0" solref="1e-2 1" solimp=".99 .99 .01"/>
-    <joint joint1="l_b_bar_1" joint2="l_b_bar_3" polycoef="0 1 0 0 0" solref="1e-2 1" solimp=".99 .99 .01"/>
-    <joint joint1="l_b_bar_1" joint2="l_b_fingers" polycoef="0 -1 0 0 0" solref="1e-2 1" solimp=".99 .99 .01"/>
+    <joint joint1="l_f_bar_1_joint" joint2="l_b_bar_1_joint" polycoef="0 1 0 0 0" solref="1e-4 1" solimp=".99 .99 .01"/>
+    <joint joint1="l_f_bar_1_joint" joint2="l_f_bar_2_joint" polycoef="0 1 0 0 0" solref="1e-2 1" solimp=".99 .99 .01"/>
+    <joint joint1="l_f_bar_1_joint" joint2="l_f_bar_3_joint" polycoef="0 1 0 0 0" solref="1e-2 1" solimp=".99 .99 .01"/>
+    <joint joint1="l_f_bar_1_joint" joint2="l_f_finger_joint" polycoef="0 -1 0 0 0" solref="1e-2 1" solimp=".99 .99 .01"/>
+    <joint joint1="l_b_bar_1_joint" joint2="l_b_bar_2_joint" polycoef="0 1 0 0 0" solref="1e-2 1" solimp=".99 .99 .01"/>
+    <joint joint1="l_b_bar_1_joint" joint2="l_b_bar_3_joint" polycoef="0 1 0 0 0" solref="1e-2 1" solimp=".99 .99 .01"/>
+    <joint joint1="l_b_bar_1_joint" joint2="l_b_finger_joint" polycoef="0 -1 0 0 0" solref="1e-2 1" solimp=".99 .99 .01"/>
 
-    <joint joint1="r_f_bar_1_joint" joint2="r_b_bar_1" polycoef="0 1 0 0 0" solref="1e-4 1" solimp=".99 .99 .01"/>
-    <joint joint1="r_f_bar_1_joint" joint2="r_f_bar_2" polycoef="0 1 0 0 0" solref="1e-2 1" solimp=".99 .99 .01"/>
-    <joint joint1="r_f_bar_1_joint" joint2="r_f_bar_3" polycoef="0 1 0 0 0" solref="1e-2 1" solimp=".99 .99 .01"/>
-    <joint joint1="r_f_bar_1_joint" joint2="r_f_fingers" polycoef="0 -1 0 0 0" solref="1e-2 1" solimp=".99 .99 .01"/>
-    <joint joint1="r_b_bar_1" joint2="r_b_bar_2" polycoef="0 1 0 0 0" solref="1e-2 1" solimp=".99 .99 .01"/>
-    <joint joint1="r_b_bar_1" joint2="r_b_bar_3" polycoef="0 1 0 0 0" solref="1e-2 1" solimp=".99 .99 .01"/>
-    <joint joint1="r_b_bar_1" joint2="r_b_fingers" polycoef="0 -1 0 0 0" solref="1e-2 1" solimp=".99 .99 .01"/>
+    <joint joint1="r_f_bar_1_joint" joint2="r_b_bar_1_joint" polycoef="0 1 0 0 0" solref="1e-4 1" solimp=".99 .99 .01"/>
+    <joint joint1="r_f_bar_1_joint" joint2="r_f_bar_2_joint" polycoef="0 1 0 0 0" solref="1e-2 1" solimp=".99 .99 .01"/>
+    <joint joint1="r_f_bar_1_joint" joint2="r_f_bar_3_joint" polycoef="0 1 0 0 0" solref="1e-2 1" solimp=".99 .99 .01"/>
+    <joint joint1="r_f_bar_1_joint" joint2="r_f_finger_joint" polycoef="0 -1 0 0 0" solref="1e-2 1" solimp=".99 .99 .01"/>
+    <joint joint1="r_b_bar_1_joint" joint2="r_b_bar_2_joint" polycoef="0 1 0 0 0" solref="1e-2 1" solimp=".99 .99 .01"/>
+    <joint joint1="r_b_bar_1_joint" joint2="r_b_bar_3_joint" polycoef="0 1 0 0 0" solref="1e-2 1" solimp=".99 .99 .01"/>
+    <joint joint1="r_b_bar_1_joint" joint2="r_b_finger_joint" polycoef="0 -1 0 0 0" solref="1e-2 1" solimp=".99 .99 .01"/>
   </equality>
   <tendon>
     <fixed name="l_claw_split">
       <joint joint="l_f_bar_1_joint" coef="0.5" />
-      <joint joint="l_b_bar_1" coef="0.5" />
+      <joint joint="l_b_bar_1_joint" coef="0.5" />
     </fixed>
     <fixed name="r_claw_split">
       <joint joint="r_f_bar_1_joint" coef="0.5" />
-      <joint joint="r_b_bar_1" coef="0.5" />
+      <joint joint="r_b_bar_1_joint" coef="0.5" />
     </fixed>
   </tendon>
   <actuator>

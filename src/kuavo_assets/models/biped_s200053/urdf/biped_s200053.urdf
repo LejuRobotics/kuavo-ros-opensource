@@ -1006,10 +1006,12 @@
       </geometry>
     </collision>
   </link>
-  <joint name="l_f_bar_2_joint" type="fixed">
+  <joint name="l_f_bar_2_joint" type="revolute">
     <origin xyz="0.011329 0 0.0063767" rpy="0 0 0" />
     <parent link="l_f_bar_1" />
     <child link="l_f_bar_2" />
+    <axis xyz="0 1 0" />
+    <limit lower="-0.698" upper="0.698" effort="10.0" velocity="1.0" />
     </joint>
   <link name="l_f_bar_3">
     <inertial>
@@ -1062,10 +1064,12 @@
       </geometry>
     </collision>
   </link>
-  <joint name="l_f_finger_joint" type="fixed">
+  <joint name="l_f_finger_joint" type="revolute">
     <origin xyz="-0.0081591 0 -0.047301" rpy="0 0 0" />
     <parent link="l_f_bar_3" />
     <child link="l_f_finger" />
+    <axis xyz="0 1 0" />
+    <limit lower="-0.698" upper="0.698" effort="10.0" velocity="1.0" />
     </joint>
   <link name="l_f_bar_4">
     <inertial>
@@ -1089,7 +1093,7 @@
       </geometry>
     </collision>
   </link>
-  <joint name="l_f_bar_4_joint" type="fixed">
+  <joint name="l_f_bar_4_joint" type="revolute">
     <origin xyz="0.02 0 -0.09" rpy="0 0 0" />
     <parent link="l_twofinger_base" />
     <child link="l_f_bar_4" />
@@ -1147,10 +1151,12 @@
       </geometry>
     </collision>
   </link>
-  <joint name="l_b_bar_2_joint" type="fixed">
+  <joint name="l_b_bar_2_joint" type="revolute">
     <origin xyz="-0.011329 0 0.0063767" rpy="0 0 0" />
     <parent link="l_b_bar_1" />
     <child link="l_b_bar_2" />
+    <axis xyz="0 1 0" />
+    <limit lower="-0.698" upper="0.698" effort="10.0" velocity="1.0" />
     </joint>
   <link name="l_b_bar_3">
     <inertial>
@@ -1203,10 +1209,12 @@
       </geometry>
     </collision>
   </link>
-  <joint name="l_b_finger_joint" type="fixed">
+  <joint name="l_b_finger_joint" type="revolute">
     <origin xyz="0.0081591 0 -0.047301" rpy="0 0 0" />
     <parent link="l_b_bar_3" />
     <child link="l_b_finger" />
+    <axis xyz="0 1 0" />
+    <limit lower="-0.698" upper="0.698" effort="10.0" velocity="1.0" />
     </joint>
   <link name="l_b_bar_4">
     <inertial>
@@ -1230,7 +1238,7 @@
       </geometry>
     </collision>
   </link>
-  <joint name="l_b_bar_4_joint" type="fixed">
+  <joint name="l_b_bar_4_joint" type="revolute">
     <origin xyz="-0.02 0 -0.09" rpy="0 0 0" />
     <parent link="l_twofinger_base" />
     <child link="l_b_bar_4" />
@@ -1615,10 +1623,12 @@
       </geometry>
     </collision>
   </link>
-  <joint name="r_f_bar_2_joint" type="fixed">
+  <joint name="r_f_bar_2_joint" type="revolute">
     <origin xyz="0.011329 0 0.0063767" rpy="0 0 0" />
     <parent link="r_f_bar_1" />
     <child link="r_f_bar_2" />
+    <axis xyz="0 1 0" />
+    <limit lower="-0.698" upper="0.698" effort="10.0" velocity="1.0" />
     </joint>
   <link name="r_f_bar_3">
     <inertial>
@@ -1671,10 +1681,12 @@
       </geometry>
     </collision>
   </link>
-  <joint name="r_f_finger_joint" type="fixed">
+  <joint name="r_f_finger_joint" type="revolute">
     <origin xyz="-0.0081591 0 -0.047301" rpy="0 0 0" />
     <parent link="r_f_bar_3" />
     <child link="r_f_finger" />
+    <axis xyz="0 1 0" />
+    <limit lower="-0.698" upper="0.698" effort="10.0" velocity="1.0" />
     </joint>
   <link name="r_f_bar_4">
     <inertial>
@@ -1698,7 +1710,7 @@
       </geometry>
     </collision>
   </link>
-  <joint name="r_f_bar_4_joint" type="fixed">
+  <joint name="r_f_bar_4_joint" type="revolute">
     <origin xyz="0.02 0 -0.09" rpy="0 0 0" />
     <parent link="r_twofinger_base" />
     <child link="r_f_bar_4" />
@@ -1756,10 +1768,12 @@
       </geometry>
     </collision>
   </link>
-  <joint name="r_b_bar_2_joint" type="fixed">
+  <joint name="r_b_bar_2_joint" type="revolute">
     <origin xyz="-0.011329 0 0.0063767" rpy="0 0 0" />
     <parent link="r_b_bar_1" />
     <child link="r_b_bar_2" />
+    <axis xyz="0 1 0" />
+    <limit lower="-0.698" upper="0.698" effort="10.0" velocity="1.0" />
     </joint>
   <link name="r_b_bar_3">
     <inertial>
@@ -1812,10 +1826,12 @@
       </geometry>
     </collision>
   </link>
-  <joint name="r_b_finger_joint" type="fixed">
+  <joint name="r_b_finger_joint" type="revolute">
     <origin xyz="0.0081591 0 -0.047301" rpy="0 0 0" />
     <parent link="r_b_bar_3" />
     <child link="r_b_finger" />
+    <axis xyz="0 1 0" />
+    <limit lower="-0.698" upper="0.698" effort="10.0" velocity="1.0" />
     </joint>
   <link name="r_b_bar_4">
     <inertial>
@@ -1839,7 +1855,7 @@
       </geometry>
     </collision>
   </link>
-  <joint name="r_b_bar_4_joint" type="fixed">
+  <joint name="r_b_bar_4_joint" type="revolute">
     <origin xyz="-0.02 0 -0.09" rpy="0 0 0" />
     <parent link="r_twofinger_base" />
     <child link="r_b_bar_4" />

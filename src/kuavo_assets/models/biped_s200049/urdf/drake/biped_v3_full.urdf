@@ -584,7 +584,7 @@
       </material>
     </visual>
   </link>
-  <joint name="l_f_bar_2" type="fixed">
+  <joint name="l_f_bar_2_joint" type="fixed">
     <origin xyz="0.025438097941138 0 -0.0464962705293307" rpy="0 0 0" />
     <parent link="l_f_bar_1" />
     <child link="l_f_bar_2" />
@@ -606,7 +606,7 @@
       </material>
     </visual>
   </link>
-  <joint name="l_f_fingers" type="fixed">
+  <joint name="l_f_finger_joint" type="fixed">
     <origin xyz="-0.0191548518271909 0 -0.0292932014550821" rpy="0 0 0" />
     <parent link="l_f_bar_2" />
     <child link="l_f_fingers" />
@@ -650,7 +650,7 @@
       </material>
     </visual>
   </link>
-  <joint name="l_b_bar_1" type="fixed">
+  <joint name="l_b_bar_1_joint" type="fixed">
     <origin xyz="-0.0219999996097237 0 -0.1114" rpy="0 0 0" />
     <parent link="zarm_l7_link" />
     <child link="l_b_bar_1" />
@@ -672,7 +672,7 @@
       </material>
     </visual>
   </link>
-  <joint name="l_b_bar_2" type="fixed">
+  <joint name="l_b_bar_2_joint" type="fixed">
     <origin xyz="-0.0254380979411351 0 -0.0464962705293328" rpy="0 0 0" />
     <parent link="l_b_bar_1" />
     <child link="l_b_bar_2" />
@@ -694,7 +694,7 @@
       </material>
     </visual>
   </link>
-  <joint name="l_b_fingers" type="fixed">
+  <joint name="l_b_finger_joint" type="fixed">
     <origin xyz="0.0191548518271917 0 -0.0292932014550803" rpy="0 0 0" />
     <parent link="l_b_bar_2" />
     <child link="l_b_fingers" />
@@ -950,7 +950,7 @@
       </material>
     </visual>
   </link>
-  <joint name="r_f_bar_2" type="fixed">
+  <joint name="r_f_bar_2_joint" type="fixed">
     <origin xyz="0.0254380979411394 0 -0.0464962705293306" rpy="0 0 0" />
     <parent link="r_f_bar_1" />
     <child link="r_f_bar_2" />
@@ -972,7 +972,7 @@
       </material>
     </visual>
   </link>
-  <joint name="r_f_fingers" type="fixed">
+  <joint name="r_f_finger_joint" type="fixed">
     <origin xyz="-0.0191548518271941 0 -0.0292932014550819" rpy="0 0 0" />
     <parent link="r_f_bar_2" />
     <child link="r_f_fingers" />
@@ -1016,7 +1016,7 @@
       </material>
     </visual>
   </link>
-  <joint name="r_b_bar_1" type="fixed">
+  <joint name="r_b_bar_1_joint" type="fixed">
     <origin xyz="-0.022000000390599 -0.000500000000001402 -0.111399999999999" rpy="0 0 0" />
     <parent link="zarm_r7_link" />
     <child link="r_b_bar_1" />
@@ -1038,7 +1038,7 @@
       </material>
     </visual>
   </link>
-  <joint name="r_b_bar_2" type="fixed">
+  <joint name="r_b_bar_2_joint" type="fixed">
     <origin xyz="-0.0254380979411353 0 -0.0464962705293326" rpy="0 0 0" />
     <parent link="r_b_bar_1" />
     <child link="r_b_bar_2" />
@@ -1060,7 +1060,7 @@
       </material>
     </visual>
   </link>
-  <joint name="r_b_fingers" type="fixed">
+  <joint name="r_b_finger_joint" type="fixed">
     <origin xyz="0.0191548518271923 0 -0.0292932014550809" rpy="0 0 0" />
     <parent link="r_b_bar_2" />
     <child link="r_b_fingers" />
