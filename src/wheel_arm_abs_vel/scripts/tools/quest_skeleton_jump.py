@@ -42,16 +42,19 @@ class QuestSkeletonJumpCorrection:
         position = np.array([transforms[i][:3, 3] for i in self.indices])
         position = (position - chest_position) @ chest_rotation
         palms = chest_rotation.T @ np.array([transforms[i][:3, :3] for i in self.palms])
-        if key != self.key or dt < 0. or dt > self.max_gap or self.stamp is None:
+        contract_changed = key != self.key or dt < 0. or self.stamp is None
+        if contract_changed:
             self.key = key
             self.world_from_tracking = None
+        if contract_changed or dt > self.max_gap:
+            # Restart local rejoin history in tracking space; the shared frame survives a gap.
             self.correcting[:] = False
             self.rebased = False
             self.stamp, self.chest = stamp, chest
             self.previous_position = self.position = position
             self.previous_palms = self.palm_rotation = palms
-            self.measurements = transforms
-            return transforms
+            self.measurements = self._in_world_frame(transforms)
+            return self.measurements
 
         delta = position-self.previous_position
         displacement_squared = np.einsum('ij,ij->i', delta, delta).reshape(2, 3).max(axis=1)
@@ -77,12 +80,9 @@ class QuestSkeletonJumpCorrection:
         consider = abrupt | self.correcting
         needs_local_correction = consider.any()
         self.correcting[:] = False
-        if self.world_from_tracking is None and not needs_local_correction:
-            result = transforms
-        elif self.world_from_tracking is None:
+        result = self._in_world_frame(transforms)
+        if needs_local_correction and result is transforms:
             result = transforms.copy()
-        else:
-            result = {i: self.world_from_tracking @ pose for i, pose in transforms.items()}
 
         corrected_position, corrected_palms = position, palms
         if needs_local_correction:
@@ -112,3 +112,8 @@ class QuestSkeletonJumpCorrection:
         self.position, self.palm_rotation = corrected_position, corrected_palms
         self.measurements = result
         return result
+
+    def _in_world_frame(self, transforms):
+        if self.world_from_tracking is None:
+            return transforms
+        return {i: self.world_from_tracking @ pose for i, pose in transforms.items()}
