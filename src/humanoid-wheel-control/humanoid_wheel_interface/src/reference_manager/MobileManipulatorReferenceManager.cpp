@@ -278,8 +278,14 @@ namespace mobile_manipulator {
           // 累积更新，保持连续
           yaw = last_yaw + delta;
       }
-        // 更新上一次的值
-        last_yaw = yaw;
+      // waist_yaw 关节只有 ±π。贴着分界时，对侧的 yaw_raw 会让连续角跨出 ±π
+      // （+3.092 被展开成 -3.192）。折回 (-π, π] 后与传感器一致，反向键才能离开限位。
+      if (yaw > M_PI) {
+          yaw -= 2.0 * M_PI;
+      } else if (yaw < -M_PI) {
+          yaw += 2.0 * M_PI;
+      }
+      last_yaw = yaw;
 
       return {pitch, yaw};
   }

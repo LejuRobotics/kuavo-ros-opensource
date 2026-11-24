@@ -170,6 +170,11 @@ namespace mobile_manipulator
             open_loop_torso_pitch_ = msg->angular.y;
             has_open_loop_torso_state_ = true;
           });
+      // VR 单手躯干节点存活期间，手柄不得停在躯干模式。旋转组松杆仍会发零速度，
+      // 和 /cmd_torso_vel 抢同一份 ReferenceManager 状态，躯干升降会台阶式卡顿。
+      vr_single_hand_torso_owner_sub_ = nodeHandle_.subscribe<std_msgs::Bool>(
+          "/vr_single_hand_torso_owner", 1,
+          &MobileManipulatorJoyControl::vrSingleHandTorsoOwnerCallback, this);
       
       // 初始化MPC模式切换服务客户端
       mpc_control_client_ = nodeHandle_.serviceClient<kuavo_msgs::changeTorsoCtrlMode>("/mobile_manipulator_mpc_control");
@@ -368,6 +373,8 @@ namespace mobile_manipulator
     bool reset_window_active_{false};
     bool pending_mode_valid_{false};
     ControlMode pending_mode_{ControlMode::CMD_VEL};
+    bool vr_single_hand_torso_owner_{false};
+    ros::Subscriber vr_single_hand_torso_owner_sub_;
 
     // MPC observation相关标志，用于判断是否已经完成初始化
     bool get_observation_ = false;
@@ -833,9 +840,32 @@ namespace mobile_manipulator
       }
     }
 
+    void vrSingleHandTorsoOwnerCallback(const std_msgs::Bool::ConstPtr& msg)
+    {
+      vr_single_hand_torso_owner_ = msg->data;
+      if (!vr_single_hand_torso_owner_)
+      {
+        return;
+      }
+      if (pending_mode_valid_ && pending_mode_ == ControlMode::TORSO_CONTROL)
+      {
+        pending_mode_valid_ = false;
+      }
+      if (current_mode_ == ControlMode::TORSO_CONTROL)
+      {
+        ROS_INFO("VR single-hand torso active, switch gamepad from torso control to cmd_vel");
+        switchControlMode(ControlMode::CMD_VEL);
+      }
+    }
+
     // 切换控制模式
     void switchControlMode(ControlMode new_mode)
     {
+      if (new_mode == ControlMode::TORSO_CONTROL && vr_single_hand_torso_owner_)
+      {
+        ROS_WARN_THROTTLE(2.0, "VR single-hand torso is active, ignore gamepad torso mode");
+        return;
+      }
       if (new_mode != current_mode_)
       {
         if (current_mode_ == ControlMode::TORSO_CONTROL) {

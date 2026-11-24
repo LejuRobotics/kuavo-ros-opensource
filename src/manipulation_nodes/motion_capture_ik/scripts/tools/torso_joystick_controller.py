@@ -527,6 +527,29 @@ class TorsoController:
             self.main_hand = None
 
 
+def claim_vr_single_hand_torso_owner(controller: "TorsoController") -> None:
+    """Tell the gamepad node to leave torso mode while this VR torso controller is alive.
+
+    Latched so a later-starting gamepad node still exits. Shutdown clears the latch
+    and gamepad torso mode can be entered again.
+    """
+    import rospy
+    from std_msgs.msg import Bool
+
+    pub = rospy.Publisher("/vr_single_hand_torso_owner", Bool, queue_size=1, latch=True)
+    controller._vr_torso_owner_pub = pub
+    pub.publish(Bool(data=True))
+    rospy.loginfo("VR single-hand torso owns the torso; gamepad leaves torso control mode")
+
+    def _release_owner():
+        try:
+            pub.publish(Bool(data=False))
+        except Exception:
+            pass
+
+    rospy.on_shutdown(_release_owner)
+
+
 def create_torso_controller(init_timeout_sec: float = 5.0) -> "TorsoController":
     """在真实 ROS 环境里装配 TorsoController。失败时调用 rospy.signal_shutdown。"""
     import rospy
@@ -600,7 +623,7 @@ def create_torso_controller(init_timeout_sec: float = 5.0) -> "TorsoController":
                 rospy.logerr_throttle(5.0, f"{topic} publish 异常: {e}")
         return _publish
 
-    return TorsoController(
+    controller = TorsoController(
         initial_pose_xyz=initial_xyz,
         publisher=_safe_publish(pub_pose, "/cmd_lb_torso_pose"),
         vel_publisher=_safe_publish(pub_vel, "/cmd_torso_vel"),
@@ -611,3 +634,5 @@ def create_torso_controller(init_timeout_sec: float = 5.0) -> "TorsoController":
         state_getter=lambda: open_loop_state_lock[0],
         limits=limits,
     )
+    claim_vr_single_hand_torso_owner(controller)
+    return controller
