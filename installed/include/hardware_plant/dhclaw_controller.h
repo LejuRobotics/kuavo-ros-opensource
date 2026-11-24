@@ -60,6 +60,8 @@ public:
 
     void close();
 
+    // Copy position, status and sample identity together under the cache lock.
+    ClawState get_feedback();
     std::vector<double> get_positions();
     std::vector<double> get_torque();
     std::vector<double> get_velocity();
@@ -110,13 +112,16 @@ private:
     std::mutex task_mutex_;
     std::condition_variable condition_;
     std::thread worker_;
-    bool stop_worker_ = false;
+    std::atomic_bool stop_worker_{false};
 
     std::atomic_bool claw_is_executing_{false};
+    std::mutex feedback_poll_mutex_;
     mutable std::mutex feedback_mutex_;
     std::array<State, 2> gripper_state_ = {State::kUnknown, State::kUnknown};
     std::vector<double> last_position_{0.0, 0.0};
     std::chrono::steady_clock::time_point last_feedback_poll_{};
+    std::chrono::steady_clock::time_point feedback_sample_time_{};
+    uint32_t feedback_sequence_ = 0;
     LejuClawDebugCallback debug_callback_;
 
     // last commanded effort (no continuous torque feedback from DH)

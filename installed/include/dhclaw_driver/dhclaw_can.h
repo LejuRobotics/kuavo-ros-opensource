@@ -113,6 +113,8 @@ public:
     /// @return 当前位置 0-100 (硬件 0-1000 已反转映射, 0=全开, 100=全关)
     int      getGripStatus();
     uint16_t getPosition();
+    /// Return false on unreadable/out-of-range feedback; leave output unchanged.
+    bool getPosition(uint16_t& position);
 
     // ---- 低级 Modbus ----
     bool writeRegister(uint16_t addr, uint16_t value);

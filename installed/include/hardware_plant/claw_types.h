@@ -1,6 +1,8 @@
 #ifndef CLAW_TYPES_H_
 #define CLAW_TYPES_H_
 
+#include <chrono>
+#include <cstdint>
 #include <string>
 #include <vector>
 #include <functional>
@@ -18,6 +20,9 @@ struct ClawState {
     JointState data;
     std::vector<int8_t> state = {0, 0};
     bool is_high_freq = false;
+    // DH-only feedback metadata. Cached reads retain identity and query-start time.
+    uint32_t feedback_sequence = 0;
+    std::chrono::steady_clock::time_point feedback_sample_time{};
 };
 
 struct lejuClawCommand {
