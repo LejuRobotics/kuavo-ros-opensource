@@ -607,7 +607,7 @@ setup_arm_motor() {
     fi
 
     # Find config.yaml or long_arm_config.yaml in ruiwo_controller directory
-    src_config=$(find ~/kuavo-ros-opensource -type f -path "*/ruiwo_controller/long_arm_config.yaml" 2>/dev/null)
+    src_config=$(find "$HOME/kuavo-ros-opensource/installed/$(uname -m)" -type f -path "*/ruiwo_controller/long_arm_config.yaml" -print -quit 2>/dev/null || true)
 
     if [ -z "$src_config" ]; then
         print_error "未找到 ruiwo_controller/${config_file} 文件"
