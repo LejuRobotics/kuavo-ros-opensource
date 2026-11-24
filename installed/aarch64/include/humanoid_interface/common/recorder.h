@@ -42,6 +42,8 @@
 #endif
 #include <time.h>
 
+#include <filesystem>
+#include <set>
 #include <queue>
 #include <string>
 #include <vector>
@@ -126,6 +128,7 @@ public:
     ~Recorder();
 
     void doTrigger();
+    std::set<std::filesystem::path> getRecordedFiles() const;
 
     bool isSubscribed(std::string const& topic) const;
 
@@ -145,7 +148,8 @@ private:
 
     void updateFilenames();
     void startWriting();
-    void stopWriting();
+    void openBag(const std::string& active_filename);
+    void stopWriting(const std::string& target_filename);
 
     bool checkLogging();
     bool scheduledCheckDisk();
@@ -176,6 +180,8 @@ private:
     std::string                   target_filename_;
     std::string                   write_filename_;
     std::list<std::string>        current_files_;
+    mutable boost::mutex          recorded_files_mutex_;
+    std::set<std::filesystem::path> recorded_files_;
 
     std::set<std::string>         currently_recording_;  //!< set of currently recording topics
     std::vector<boost::shared_ptr<ros::Subscriber>> subscribers_;  //!< Hold all subscribers to break reference cycle on destruction

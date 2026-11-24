@@ -71,6 +71,22 @@ class QuestSkeletonJumpTest(unittest.TestCase):
         self.assertFalse(self.guard.rebased)
         np.testing.assert_allclose(corrected[4], advanced[4], atol=1.e-12)
 
+    def test_shared_frame_change_persists_across_gap_over_100ms(self):
+        jump = np.eye(4)
+        jump[:3, :3] = exp_so3(np.array([0., 0., .69]))
+        jump[:3, 3] = (.92, .36, 0.)
+        frame = {i: jump @ pose for i, pose in self.initial.items()}
+        self.guard.update(frame, .008, 1)
+        self.assertTrue(self.guard.rebased)
+        self.guard.update(frame, .016, 1)
+        for stamp in (.2, .208):
+            corrected = self.guard.update(frame, stamp, 1)
+            self.assertFalse(self.guard.rebased)
+            self.assertFalse(self.guard.correcting.any())
+            self.assertIs(self.guard.update(frame, stamp, 1), corrected)
+            for i, pose in self.initial.items():
+                np.testing.assert_allclose(corrected[i], pose, atol=1.e-12)
+
     def test_different_session_restarts_without_old_correction(self):
         frame = skeleton()
         frame[5][0, 3] += .067

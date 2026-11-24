@@ -831,12 +831,13 @@ class Quest3ArmInfoTransformer:
                         and 0. < stamp-estimator.stamp <= estimator.max_gap):
                     previous_prediction = (estimator.states[23], estimator.chest_rotation_measurement)
                 measurements = transforms
-                if self.quest_skeleton_jump is not None:
-                    if estimator.key != key:
-                        self.quest_skeleton_jump.reset()
+                jump_guard = getattr(self, "quest_skeleton_jump", None)
+                if jump_guard is not None:
+                    if msg.is_hand_tracking or (jump_guard.key is not None and jump_guard.key != key):
+                        jump_guard.reset()
                     if not msg.is_hand_tracking:
-                        measurements = self.quest_skeleton_jump.update(transforms, stamp, key)
-                        if self.quest_skeleton_jump.rebased:
+                        measurements = jump_guard.update(transforms, stamp, key)
+                        if jump_guard.rebased:
                             previous_prediction = None
                 self.estimated_bones = estimator.update(measurements, stamp, key)
                 if previous_prediction is not None and estimator.chest_rotation_stamp == stamp:
