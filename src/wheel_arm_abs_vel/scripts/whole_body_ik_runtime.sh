@@ -28,6 +28,7 @@ case "$mode" in
     exec "$@"
     ;;
   background) exec "$@" ;;
+  glove_sdk) exec /usr/bin/python3 "$package_dir/scripts/runtime_partition.py" --glove-sdk "$@" ;;
   ik) exec "$@" ;;
   reference_services) shift; exec rosrun wheel_arm_abs_vel fixed_ik_reference_services_node "$@" ;;
   mapper) exec /usr/bin/python3 "$@" ;;

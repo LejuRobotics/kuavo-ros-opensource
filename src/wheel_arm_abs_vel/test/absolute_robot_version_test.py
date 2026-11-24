@@ -64,7 +64,8 @@ class IdentityTest(unittest.TestCase):
 
     def test_wrapper_autodetect_and_explicit_override(self):
         for version in RESOLVED_VERSIONS:
-            for entry in ('quest_velocity_ik.launch', 'load_kuavo_real_velocity_ik.launch',
+            for entry in ('quest_velocity_ik.launch', 'quest_windows_udp.launch',
+                          'load_kuavo_real_velocity_ik.launch',
                           'load_kuavo_mujoco_velocity_ik.launch',
                           'load_kuavo_absolute_sim_base.launch', 'control.launch'):
                 args = ['wheel_arm_abs_vel', entry]

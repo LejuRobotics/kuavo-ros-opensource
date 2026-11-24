@@ -68,6 +68,7 @@ add_message_files(
   RobotStatus.msg
   StepControlGoal.msg
   TaskDetailStatus.msg
+  LocalizationStatus.msg
 )
 
 ## Generate services in the 'srv' folder

@@ -232,8 +232,9 @@
   <param name="/pinocchio_deployment/LEGACY_NORMAL_QUICK_SWITCH" value="DISABLED" type="str" />
   <param name="/pinocchio_deployment/IK_PIPELINE" value="PINOCCHIO_VELOCITY" type="str" />
   <arg name="ee_type" default="auto" />
-  <arg name="sg100_kp" default="10" />
-  <arg name="sg100_kd" default="0.2" />
+  <!-- Match the standard wheel controller defaults used by glove commands without per-joint gains. -->
+  <arg name="sg100_kp" default="0.1" />
+  <arg name="sg100_kd" default="0.002" />
   <arg name="sg100_output_limit" default="0.6" />
   <param name="sg100_kp" value="$(arg sg100_kp)" />
   <param name="sg100_kd" value="$(arg sg100_kd)" />

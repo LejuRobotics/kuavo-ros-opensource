@@ -5,7 +5,7 @@ absolute_entry=false
 fence_entry=false
 if [[ "$1" == wheel_arm_abs_vel ]]; then
   case "$2" in
-    load_kuavo_real_velocity_ik.launch|load_kuavo_mujoco_velocity_ik.launch|load_kuavo_absolute_sim_base.launch|quest_velocity_ik.launch|pico_velocity_ik.launch)
+    load_kuavo_real_velocity_ik.launch|load_kuavo_mujoco_velocity_ik.launch|load_kuavo_absolute_sim_base.launch|quest_velocity_ik.launch|quest_windows_udp.launch|pico_velocity_ik.launch)
       absolute_entry=true ;;
     control.launch)
       selector=legacy

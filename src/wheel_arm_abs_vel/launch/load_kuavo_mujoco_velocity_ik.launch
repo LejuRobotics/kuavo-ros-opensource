@@ -17,6 +17,8 @@
   <arg name="dynamics_backend" default="rnea" />
   <arg name="rnea_mode" default="full" />
   <arg name="visualize_humanoid" default="false" />
+  <arg name="enable_base_control" default="true" doc="Subscribe to /whole_body_velocity_ik/base_cmd_vel" />
+  <arg name="base_locked" default="true" doc="False releases joystick chassis commands when enable_base_control is true" />
   <include file="$(find wheel_arm_abs_vel)/launch/load_kuavo_absolute_sim_base.launch">
     <arg name="filter_tuning_enabled" value="$(arg filter_tuning_enabled)" />
     <arg name="require_ik_hard_isolation" value="$(arg require_ik_hard_isolation)" />
@@ -41,5 +43,7 @@
     <arg name="reference_transport" value="$(arg reference_transport)" />
     <arg name="reference_shm_key" value="$(arg reference_shm_key)" />
     <arg name="owner_shm_key" value="$(arg owner_shm_key)" />
+    <arg name="enable_base_control" value="$(arg enable_base_control)" />
+    <arg name="base_locked" value="$(arg base_locked)" />
   </include>
 </launch>

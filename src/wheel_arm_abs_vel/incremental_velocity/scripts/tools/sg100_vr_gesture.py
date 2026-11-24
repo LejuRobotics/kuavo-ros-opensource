@@ -46,7 +46,7 @@ class Sg100VrGestureClient:
         import rospy
         from kuavo_msgs.srv import SG100StepGesture
         self.rospy = rospy
-        self.client = rospy.ServiceProxy('/sg100/step_gesture', SG100StepGesture)
+        self.client = rospy.ServiceProxy('/sg100/vr_step_gesture', SG100StepGesture)
         self.gate = GestureTouchGate()
         self.requests = queue.Queue(maxsize=1)
         threading.Thread(target=self._run, daemon=True).start()

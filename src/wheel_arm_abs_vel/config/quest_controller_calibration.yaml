@@ -1,0 +1,101 @@
+quest3:
+  controller_calibration:
+    enabled: true
+    schema_version: 2
+    method: semantic_two_pose_known_normal_offset
+    metadata:
+      orientation_calibrated: true
+      translation_calibrated: true
+      distance_source: user_prior
+      translation_status: known_normal_distance_prior
+      distance_is_prior_not_measured: true
+      full_translation_observable: false
+      labels:
+      - facing
+      - down
+      method: semantic_two_pose_known_normal_offset
+      pose_order: facing,down
+      left:
+        normal_residual_deg:
+        - 3.1918256830717766
+        - 3.1918256830716625
+        semantic_rotation_residual_deg:
+        - 3.5507753068222154
+        - 3.550775306822244
+        semantic_rotation_candidate_xyzw:
+        - -0.15950031560472006
+        - -0.2931519737665353
+        - 0.3026143142963159
+        - -0.892774409569265
+      right:
+        normal_residual_deg:
+        - 2.981343154395732
+        - 2.981343154395732
+        semantic_rotation_residual_deg:
+        - 3.2528947142993956
+        - 3.252894714299426
+        semantic_rotation_candidate_xyzw:
+        - 0.24575284905229505
+        - -0.2705103212185425
+        - -0.27841123913041815
+        - -0.8882099330804547
+      model_path: /home/lab/lihengyu/kuavo-ros-control/src/kuavo_assets/models/biped_s400062/urdf/biped_s400062.urdf
+      eef_axes:
+        left:
+          finger_axis_eef:
+          - 3.2310891488651735e-15
+          - 0.0
+          - -1.0
+          palm_normal_axis_eef:
+          - 0.0
+          - -1.0
+          - 0.0
+        right:
+          finger_axis_eef:
+          - 0.0
+          - -3.2310891488651735e-15
+          - -1.0
+          palm_normal_axis_eef:
+          - 0.0
+          - 1.0
+          - -3.2310891488651735e-15
+      bags:
+      - path: /root/.ros/2026-11-19-14-46-24_0.bag
+        sha256: 8d2ce994b6c3a53d9e4bcfcca1b0360dc49116ffee4c435f2e5b3afaae9e0b19
+      - path: /root/.ros/2026-11-19-14-48-33_1.bag
+        sha256: c98a3f10c42599e5cf44305ebf2c39861ed9d949b19f9b09a3a53e4e13e6510b
+      coordinate_convention: ROS HandPalm local; robot-world Z up; left axis from
+        shoulders
+      pose_order_source: operator_declared
+      algorithm_version: 1
+      holds_seconds:
+      - - 105.51360630989075
+        - 115.67480516433716
+      - - 130.8258934020996
+        - 141.17655992507935
+      created_at: '2026-11-19T15:26:25.654883+08:00'
+      quality_gate: activation_eligible
+      known_distance_m: 0.15
+    left:
+      palm_to_controller_offset:
+      - -0.09503565506074377
+      - 0.014085017949140001
+      - -0.11519477651589818
+      eef_post_rotation_xyzw:
+      - -0.15950031560472006
+      - -0.2931519737665353
+      - 0.3026143142963159
+      - -0.892774409569265
+    right:
+      palm_to_controller_offset:
+      - 0.09419871645889892
+      - 0.013300503753130067
+      - 0.11597283482526817
+      eef_post_rotation_xyzw:
+      - 0.24575284905229505
+      - -0.2705103212185425
+      - -0.27841123913041815
+      - -0.8882099330804547
+    eef_convention: sg100_400062
+    robot_version: 400062
+    model_sha256: 77e3d15491b968f164739d8d13e86851c369a98aa6c3ef0ec8b26f1dd24b0ed6

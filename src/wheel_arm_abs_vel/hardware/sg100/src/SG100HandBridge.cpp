@@ -207,9 +207,9 @@ void SG100HandBridge::start() {
     return;
   }
 
-  // 限位就绪后再加载手势库(避免为一次注定失败的启动做无用功)
+  // 与老 IK / 仿真 dexhand 同一套手势库（motion_capture_ik/config）。
   const std::string gesture_dir =
-      ros::package::getPath("wheel_arm_abs_vel") + "/config";
+      ros::package::getPath("motion_capture_ik") + "/config";
   const std::string left_path = gesture_dir + "/sg100_left_gesture.yaml";
   const std::string right_path = gesture_dir + "/sg100_right_gesture.yaml";
 

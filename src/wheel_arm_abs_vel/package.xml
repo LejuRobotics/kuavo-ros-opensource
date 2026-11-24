@@ -43,6 +43,7 @@
   <depend>rosbag</depend>
   <exec_depend>mujoco_cpp</exec_depend>
   <exec_depend>python3-serial</exec_depend>
+  <exec_depend>sg100_glove_bridge</exec_depend>
   <build_depend>lcm_msg</build_depend>
   <test_depend>rostest</test_depend>
   <export>

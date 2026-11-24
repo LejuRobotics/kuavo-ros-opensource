@@ -1,0 +1,46 @@
+<launch>
+  <!-- Used only by calibrate_glove_gestures.py on its own loopback ROS master. -->
+  <arg name="session_token" />
+  <arg name="backend" default="windows_udp" />
+  <arg name="backend_validated" value="$(eval {'windows_udp':'windows_udp','linux_sdk':'linux_sdk'}[arg('backend')])" />
+  <arg name="bind_address" default="0.0.0.0" />
+  <arg name="left_port" default="18003" />
+  <arg name="right_port" default="18002" />
+  <arg name="left_module_map" default="[A,B,C,D,E]" />
+  <arg name="right_module_map" default="[A,B,C,D,E]" />
+  <arg name="left_id" default="12" />
+  <arg name="right_id" default="2" />
+  <arg name="serial_port" default="auto" />
+  <arg name="sdk_python" default="" />
+  <param name="/glove_gesture_calibration/session_token" value="$(arg session_token)" type="str" />
+  <group if="$(eval arg('backend_validated') == 'windows_udp')">
+    <node pkg="sg100_glove_bridge" type="sg100_windows_udp_node.py" name="glove_calibration_receiver" output="screen" required="true">
+      <param name="side" value="both" />
+      <param name="bind_address" value="$(arg bind_address)" />
+      <param name="left_port" value="$(arg left_port)" type="int" />
+      <param name="right_port" value="$(arg right_port)" type="int" />
+      <rosparam param="left_module_map" subst_value="true">$(arg left_module_map)</rosparam>
+      <rosparam param="right_module_map" subst_value="true">$(arg right_module_map)</rosparam>
+      <param name="publish_real" value="false" type="bool" />
+      <param name="emit_gesture_poses" value="true" type="bool" />
+      <param name="calibration_capture_all_dof" value="true" type="bool" />
+      <param name="command_topic" value="/glove_gesture_calibration/discard_right" />
+      <param name="left_command_topic" value="/glove_gesture_calibration/discard_left" />
+    </node>
+  </group>
+  <group if="$(eval arg('backend_validated') == 'linux_sdk')">
+    <include file="$(find sg100_glove_bridge)/launch/sg100_glove_bridge.launch">
+      <arg name="side" value="both" />
+      <arg name="serial_port" value="$(arg serial_port)" />
+      <arg name="left_id" value="$(arg left_id)" />
+      <arg name="right_id" value="$(arg right_id)" />
+      <arg name="sdk_python" value="$(arg sdk_python)" />
+      <arg name="publish_real" value="false" />
+      <arg name="emit_gesture_poses" value="true" />
+      <arg name="gesture_enable" value="false" />
+      <arg name="use_mujoco" value="false" />
+      <arg name="command_topic" value="/glove_gesture_calibration/discard_right" />
+      <arg name="left_command_topic" value="/glove_gesture_calibration/discard_left" />
+    </include>
+  </group>
+</launch>

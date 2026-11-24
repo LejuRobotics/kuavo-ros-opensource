@@ -472,6 +472,8 @@ class IkRos:
                                     for side, y in (("left", .293), ("right", -.293))]
             self._mode_threshold = rospy.get_param("~hand_changing_mode_threshold", 1.20)
             self._reset_to_default = rospy.get_param("/reset_joint_to_default", True)
+            # Entry motion is armed only for the X+A mode-2 request below.
+            rospy.set_param("/absolute_velocity_ik/use_incremental_entry_pose", False)
             self._exit_capture = [None, None]
             self._mode_targets = [None, None]
             self._reach_stops = [ReachStop(), ReachStop()]
@@ -599,6 +601,7 @@ class IkRos:
         self.use_arm_collision = rospy.get_param('~use_arm_collision', False)
         # Opt-in for wheel Quest/Pico launches; other users retain legacy gestures.
         self.dexhand_front_trigger = rospy.get_param("~dexhand_front_trigger", False)
+        self.qianshi_enabled = rospy.get_param("~qianshi_enabled", False)
         self.sg100_enabled = (rospy.get_param("~sg100_enabled", False)
                               and end_effector_type == "heiman")
         if self.sg100_enabled:
@@ -881,6 +884,11 @@ class IkRos:
         self._publish_absolute_enable_status()
         self._fixed_operation_state_pub = rospy.Publisher(
             '/quest3/pinocchio_arm_operation_state', Float64MultiArray, queue_size=1, latch=True)
+        if self.qianshi_enabled:
+            self._glove_following = False
+            self._glove_following_pub = rospy.Publisher(
+                '/glove_gesture/teleop_active', Bool, queue_size=1, latch=True)
+            self._glove_following_pub.publish(False)
         self._fixed_startup_pub = rospy.Publisher(
             '/whole_body_velocity_ik/diagnostics/startup_operation_v1',
             Float64MultiArray, queue_size=1, latch=True)
@@ -1627,6 +1635,17 @@ class IkRos:
         if hasattr(self, '_fixed_operation_state_pub'):
             mode = self._fixed_operation_mode()
             self._fixed_operation_state_pub.publish(Float64MultiArray(data=[float(mode), float(mode)]))
+        if hasattr(self, '_glove_following_pub'):
+            with self._absolute_lock:
+                following = (self._absolute_state == AbsoluteEnableState.ACTIVE
+                             and self._controller_start_completed
+                             and self._fixed_pending_operation is None
+                             and not self._fixed_arm_hold
+                             and (self._glove_following
+                                  or self._fixed_consumer_ack_locked(time.monotonic())))
+                if following != self._glove_following:
+                    self._glove_following = following
+                    self._glove_following_pub.publish(following)
         if hasattr(self, '_fixed_startup_pub'):
             with self._absolute_lock:
                 p = self._fixed_pending_operation
@@ -1866,15 +1885,23 @@ class IkRos:
                         error = self._fixed_capture_input_error_locked()
                         if error:
                             return result(False, error)
+                        if getattr(self, "_reset_to_default", False):
+                            # 复位还在走时再按 X+A：改去准备姿态，不要按当前关节角接管。
+                            self._set_incremental_entry_pose(True)
+                            pending['resume'] = True
+                            self._absolute_resume_after_prepare = True
+                            return result(True, "X+A entry retargets PREPARE to the ready pose")
                         if state == AbsoluteEnableState.RETURNING_TO_PREP:
                             return result(*self._interrupt_fixed_prepare_locked())
-                        # PREPARE has not acquired execution yet: change intent,
-                        # keeping the original bounded dependency/acquisition wait.
+                        # reset_joint_to_default is false: follow from the current joints.
+                        self._set_incremental_entry_pose(False)
                         pending.update(mode=2, resume=False)
                         self._fixed_prepare_bootstrap = False
                         self._fixed_operation_block = False
                         self._authorize_fixed_follow_locked()
                         return result(True, "Follow replaces pending PREPARE before execution")
+                    # 进入增量的准备还没结束就按复位：改回启动臂姿。
+                    self._set_incremental_entry_pose(False)
                     pending['resume'] = False
                     self._absolute_resume_after_prepare = False
                     return result(True, "PREPARE retained; queued follow cancelled")
@@ -1892,6 +1919,7 @@ class IkRos:
                 return result(True, "Request already pending; deadline unchanged (not completed)")
             if mode == 1 and self._absolute_mode_status == (2, 2, False) and state in (AbsoluteEnableState.ACTIVE, AbsoluteEnableState.PAUSED,
                                       AbsoluteEnableState.RETURNING_TO_PREP, AbsoluteEnableState.PREPARED):
+                self._set_incremental_entry_pose(False)
                 self._fixed_operation_block = True
                 if state not in (AbsoluteEnableState.RETURNING_TO_PREP, AbsoluteEnableState.PREPARED):
                     self._pause_absolute_session()
@@ -1905,13 +1933,31 @@ class IkRos:
             if not 0 <= age <= self.absolute_enable_max_vr_age:
                 return result(False, "Fresh joystick input is required")
             if mode == 2 and state == AbsoluteEnableState.RETURNING_TO_PREP:
+                if getattr(self, "_reset_to_default", False):
+                    self._set_incremental_entry_pose(True)
+                    self._absolute_resume_after_prepare = True
+                    if self._fixed_pending_operation is not None:
+                        self._fixed_pending_operation['mode'] = 1
+                        self._fixed_pending_operation['resume'] = True
+                    return result(True, "X+A entry retargets the live PREPARE to the ready pose")
                 return result(*self._interrupt_fixed_prepare_locked())
             self._fixed_operation_error = False
             self._fixed_operation_block = True
-            self._queue_fixed_request_locked(mode, 'dependencies')
+            # reset_joint_to_default: X+A into mode 2 first moves the arms to the
+            # launch ready pose, then follow starts. False keeps the current joints.
+            if mode == 2 and getattr(self, "_reset_to_default", False):
+                self._set_incremental_entry_pose(True)
+                self._queue_fixed_request_locked(1, 'dependencies')
+                self._fixed_pending_operation['resume'] = True
+            else:
+                self._set_incremental_entry_pose(False)
+                self._queue_fixed_request_locked(mode, 'dependencies')
             if origin == 'first_trigger':
                 self._fixed_pending_operation['admission_source'] = TeleopTcpTarget.SOURCE_QUEST_CONTROLLER
         return result(True, "Request accepted; waiting for readiness and real execution acknowledgement")
+
+    def _set_incremental_entry_pose(self, enabled):
+        rospy.set_param("/absolute_velocity_ik/use_incremental_entry_pose", bool(enabled))
 
     def _queue_fixed_request_locked(self, mode, phase):
         self._initial_arm_samples = None
@@ -4444,6 +4490,7 @@ class IkRos:
             reason = error or 'stop, stale execution owner, disabled control or changed transaction'
             rospy.logwarn('[FixedStart] PREPARE interruption rejected: %s', reason)
             return False, reason
+        self._set_incremental_entry_pose(False)
         self._authorize_fixed_follow_locked()
         self._fixed_prepare_bootstrap = False
         self._fixed_operation_block = False
@@ -4600,7 +4647,7 @@ class IkRos:
                         self._grip_seq[arm] += 1
                         self._grips[arm] = pressed
         self.quest3_arm_info_transformer.read_joySticks_msg(msg)
-        if not getattr(self, "_clutches", ()):
+        if getattr(self, "qianshi_enabled", False) or not getattr(self, "_clutches", ()):
             self._controller_start_request(msg)
         hand_msg = msg
         if getattr(self, '_pico_thumb_input', None) is not None:
@@ -5244,6 +5291,8 @@ class IkRos:
                 return
             if (self._absolute_state == AbsoluteEnableState.RETURNING_TO_PREP
                     and msg.preparation_complete and self._fixed_consumer_ack_locked(time.monotonic())):
+                # 到位后不要清入口标志。PREPARED 仍在发 PREPARE，清掉会把刚收到的
+                # 准备姿态立刻拉回启动臂姿。复位由下一次 X+A 自己把标志置 false。
                 self._absolute_prepare_complete = True
                 self._absolute_state = AbsoluteEnableState.PREPARED
                 self._absolute_reason = AbsoluteEnableReason.PREPARED

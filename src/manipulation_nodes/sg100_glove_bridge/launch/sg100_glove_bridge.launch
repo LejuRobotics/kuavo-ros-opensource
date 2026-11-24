@@ -1,0 +1,92 @@
+<launch>
+  <!-- SG100 拳师手套桥接:
+       sg100_glove_node.py (ROS) -> subprocess 内置 Linux SDK
+       (sg100_runtime, Python 3.12 + Pinocchio) -> 关节/位姿行协议。
+       side=left/right: 左右手套各一个实例，独立串口/SDK 子进程；
+       单手 J 行 "J seq q0..q10"：右手发 command_topic，左手发
+       left_command_topic，MuJoCo 按话题分别驱动。
+       side=both: 单接收器同时接收左右手套，仅一个节点实例与一个
+       SDK 子进程 (hand both, left_id/right_id 显式配置)；双手 J 行
+       "J hand board_id seq q0..q10"，右手发 command_topic，
+       左手发 left_command_topic。
+       五指位姿 (emit-gesture-poses) -> /qianshi/glove_{left,right}/
+       fingertips，供 glove_gesture_node.py 手势识别。
+       本 launch 只启动一个 sg100_glove_node 与一个 MuJoCo viewer；
+       独立串口双实例方式请在 launch_quest3_ik.launch 的 qianshi 分支
+       各 include 一次（side=left/right）。publish_real:=true 时把左右手
+       11 维弧度合成 kuavo_msgs/SG100HandCommand 发到 /sg100_hand_command，
+       由已运行的 sg100_hand_driver 驱动真机。 -->
+
+  <arg name="serial_port" default="auto"/>
+  <arg name="auto_detect" default="true"/>
+  <arg name="allowed_ports" default=""/>
+  <arg name="baud" default="921600"/>
+  <arg name="side" default="both"/>
+  <arg name="right_id" default="2"/>
+  <arg name="left_id" default="12"/>
+  <arg name="sdk_python" default=""/>
+  <arg name="command_topic" default="/sg100_sim_hand_command"/>
+  <arg name="left_command_topic" default="/sg100_sim_left_hand_command"/>
+  <arg name="publish_real" default="true"/>
+  <arg name="real_command_topic" default="/sg100_hand_command"/>
+  <arg name="emit_gesture_poses" default="true"/>
+  <arg name="use_mujoco" default="true"/>
+  <arg name="command_timeout" default="1.0"/>
+  <arg name="gesture_enable" default="true"/>
+  <arg name="gesture_calibration_enable" default="true"/>
+  <arg name="gesture_calibration_file"
+       default="$(find sg100_glove_bridge)/config/glove_gesture_calibration/active.yaml"/>
+  <arg name="gesture_press_threshold" default="0.020"/>
+  <arg name="gesture_release_threshold" default="0.035"/>
+  <arg name="gesture_thumb_index_press" default="0.040"/>
+  <arg name="gesture_thumb_index_release" default="0.060"/>
+  <arg name="gesture_thumb_middle_press" default="0.040"/>
+  <arg name="gesture_thumb_middle_release" default="0.060"/>
+  <arg name="gesture_thumb_little_press" default="0.040"/>
+  <arg name="gesture_thumb_little_release" default="0.060"/>
+
+  <!-- 整体进程及 SDK 子进程继承 launch_prefix 的 CPU 亲和性。 -->
+  <arg name="pin_cores" default=""/>
+  <arg name="launch_prefix" default="$(eval 'taskset -c ' + arg('pin_cores') if arg('pin_cores') else '')"/>
+
+  <node pkg="sg100_glove_bridge" type="sg100_glove_node.py"
+        name="sg100_glove_$(arg side)" output="screen"
+        launch-prefix="$(arg launch_prefix)">
+    <param name="side" value="$(arg side)"/>
+    <param name="serial_port" value="$(arg serial_port)"/>
+    <param name="auto_detect" value="$(arg auto_detect)" type="bool"/>
+    <param name="allowed_ports" value="$(arg allowed_ports)"/>
+    <param name="baud" value="$(arg baud)"/>
+    <param name="right_id" value="$(arg right_id)"/>
+    <param name="left_id" value="$(arg left_id)"/>
+    <param name="sdk_python" value="$(arg sdk_python)"/>
+    <param name="command_topic" value="$(arg command_topic)"/>
+    <param name="left_command_topic" value="$(arg left_command_topic)"/>
+    <param name="publish_real" value="$(arg publish_real)" type="bool"/>
+    <param name="real_command_topic" value="$(arg real_command_topic)"/>
+    <param name="emit_gesture_poses" value="$(arg emit_gesture_poses)" type="bool"/>
+    <param name="left_id" value="$(arg left_id)"/>
+  </node>
+
+  <!-- MuJoCo viewer: 一个窗口，左右手各订一条仿真话题 -->
+  <node if="$(arg use_mujoco)" pkg="sg100_glove_bridge"
+        type="sg100_mujoco_viewer_float.py"
+        name="sg100_mujoco_viewer" output="screen">
+    <param name="command_topic" value="$(arg command_topic)"/>
+    <param name="left_command_topic" value="$(arg left_command_topic)"/>
+    <param name="command_timeout" value="$(arg command_timeout)"/>
+  </node>
+
+  <!-- 手势映射打印：交互模式、X+A 等打在本 launch 的终端。 -->
+  <node if="$(arg gesture_enable)" pkg="sg100_glove_bridge" type="glove_gesture_node.py"
+        name="glove_gesture_node" output="screen" required="true"
+        args="--hz=50 --mode-hold-sec=2.0 --press-threshold=$(arg gesture_press_threshold) --release-threshold=$(arg gesture_release_threshold) --press-thumb-index=$(arg gesture_thumb_index_press) --release-thumb-index=$(arg gesture_thumb_index_release) --press-thumb-middle=$(arg gesture_thumb_middle_press) --release-thumb-middle=$(arg gesture_thumb_middle_release) --press-thumb-little=$(arg gesture_thumb_little_press) --release-thumb-little=$(arg gesture_thumb_little_release)">
+    <param name="calibration_enabled" value="$(arg gesture_calibration_enable)" type="bool"/>
+    <param name="calibration_file" value="$(arg gesture_calibration_file)" type="str"/>
+    <param name="calibration_backend" value="linux_sdk" type="str"/>
+    <rosparam param="calibration_left_module_map">[]</rosparam>
+    <rosparam param="calibration_right_module_map">[]</rosparam>
+    <param name="calibration_left_id" value="$(arg left_id)" type="int"/>
+    <param name="calibration_right_id" value="$(arg right_id)" type="int"/>
+  </node>
+</launch>

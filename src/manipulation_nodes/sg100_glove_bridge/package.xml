@@ -1,0 +1,32 @@
+<?xml version="1.0"?>
+<package format="2">
+  <name>sg100_glove_bridge</name>
+  <version>2.0.0</version>
+  <description>
+    拳师智能电磁动捕手套 -> 乐聚 SG100 灵巧手 ROS 桥 (Linux 原生)。
+    包内 sg100_runtime/ 为内置 Linux SDK (Python 3.12 + Pinocchio 4.0.0,
+    含 PoseTracker/HandRouter/SG100 IK), 由 ROS 节点经 subprocess 启动;
+    输出 11 维关节角到 /sg100_sim_hand_command (std_msgs/Float32MultiArray),
+    并提供已验证的 MuJoCo 仿真 viewer。不包含 Wine / Windows DLL / 远程求解。
+  </description>
+
+  <maintainer email="wujiayang0806@gmail.com">jiayang</maintainer>
+  <license>Proprietary</license>
+
+  <buildtool_depend>catkin</buildtool_depend>
+  <depend>rospy</depend>
+  <depend>std_msgs</depend>
+  <depend>kuavo_msgs</depend>
+
+  <!-- sg100_mujoco_viewer_float.py 依赖 (已验证环境) -->
+  <exec_depend>python3-yaml</exec_depend>
+  <exec_depend>python3-numpy</exec_depend>
+  <exec_depend>roslaunch</exec_depend>
+  <exec_depend>rosgraph</exec_depend>
+  <exec_depend>rospkg</exec_depend>
+  <exec_depend>kuavo_assets</exec_depend>
+  <exec_depend>motion_capture_ik</exec_depend>
+
+  <export>
+  </export>
+</package>

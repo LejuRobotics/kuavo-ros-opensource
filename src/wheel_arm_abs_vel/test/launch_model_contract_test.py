@@ -25,6 +25,20 @@ class LaunchModelTest(unittest.TestCase):
             [(str(PACKAGE / "launch" / file), args)], None, verbose=False)
 
 
+    def test_glove_controller_gains_match_standard_wheel_and_allow_overrides(self):
+        args = ['robot_version:=400062', 'ee_type:=heiman']
+        for overrides, expected in (([], (0.1, 0.002)),
+                                    (['sg100_kp:=2.0', 'sg100_kd:=0.04'], (2.0, 0.04))):
+            with self.subTest(overrides=overrides):
+                cfg = self.load('load_kuavo_real_velocity_ik.launch', args + overrides)
+                self.assertEqual(float(cfg.params['/sg100_kp'].value), expected[0])
+                self.assertEqual(float(cfg.params['/sg100_kd'].value), expected[1])
+                self.assertEqual(float(cfg.params['/sg100_output_limit'].value), 0.6)
+        cfg = self.load('quest_windows_udp.launch',
+                        ['robot_version:=400062', 'ip_address:=192.0.2.20'])
+        self.assertNotIn('/sg100_kp', cfg.params)
+        self.assertNotIn('/sg100_kd', cfg.params)
+
     def test_explicit_hand_gains_reach_both_input_entries(self):
         for entry in ('quest_velocity_ik.launch', 'pico_velocity_ik.launch'):
             cfg = self.load(entry, ['robot_version:=400062', 'sg100_kp:=2.0',

@@ -56,6 +56,12 @@
   <param name="/vr_ik/velocity_ik_reference_topic" value="/whole_body_velocity_ik/reference" type="string" />
   <param name="/vr_ik/velocity_ik_reference_timeout_sec" value="0.05" type="double" />
   <param name="/vr_ik/wbc_arm_ddq_feedforward_gain" value="0.25" type="double" />
+  <!-- Startup-only. enable_base_control subscribes to the joystick topic;
+       base_locked:=false is also required before those commands reach the wheels. -->
+  <arg name="enable_base_control" default="true" doc="Subscribe to /whole_body_velocity_ik/base_cmd_vel" />
+  <arg name="base_locked" default="true" doc="False releases joystick chassis commands when enable_base_control is true" />
+  <param name="/vr_ik/enable_base_control" value="$(arg enable_base_control)" type="bool" />
+  <param name="/base_locked" value="$(arg base_locked)" type="bool" />
   <!-- Default to the controller's hardware startup pose, including qibeng
          and custom preparation selection. Remove an old override when
          relaunching under the same ROS master. The zero-pose experiment

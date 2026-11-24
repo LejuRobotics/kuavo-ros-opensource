@@ -1,0 +1,66 @@
+<launch>
+    <!-- 由 quest_velocity_ik.launch 传入融合遥操参数。 -->
+    <arg name="qianshi_backend_validated" value="$(eval {'linux_sdk': 'linux_sdk', 'windows_udp': 'windows_udp'}[arg('qianshi_backend')])" />
+    <group if="$(eval arg('qianshi_backend_validated') == 'linux_sdk')">
+        <include file="$(find sg100_glove_bridge)/launch/sg100_glove_bridge.launch">
+            <arg name="side" value="$(arg qianshi_side_validated)" />
+            <arg name="launch_prefix" value="$(find wheel_arm_abs_vel)/scripts/whole_body_ik_runtime.sh glove_sdk" />
+            <arg name="auto_detect" value="$(arg qianshi_auto_detect)" />
+            <arg name="allowed_ports" value="$(arg qianshi_detected_ports)" />
+            <arg name="serial_port" value="$(arg qianshi_right_port)" />
+            <arg name="baud" value="$(arg qianshi_baud)" />
+            <arg name="left_id" value="$(arg qianshi_left_id)" />
+            <arg name="right_id" value="$(arg qianshi_right_id)" />
+            <arg name="sdk_python" value="$(arg qianshi_sdk_python)" />
+            <arg name="command_topic" value="$(arg qianshi_command_topic)" />
+            <arg name="left_command_topic" value="$(arg qianshi_left_command_topic)" />
+            <arg name="publish_real" value="$(arg qianshi_publish_real)" />
+            <arg name="real_command_topic" value="$(arg qianshi_real_command_topic)" />
+            <arg name="emit_gesture_poses" value="$(arg qianshi_emit_gesture_poses)" />
+            <arg name="use_mujoco" value="$(arg qianshi_use_mujoco)" />
+            <arg name="gesture_enable" value="false" />
+        </include>
+    </group>
+
+    <group if="$(eval arg('qianshi_backend_validated') == 'windows_udp')">
+        <node pkg="sg100_glove_bridge" type="sg100_windows_udp_node.py"
+              name="sg100_windows_udp" output="screen" required="true"
+              launch-prefix="$(find wheel_arm_abs_vel)/scripts/whole_body_ik_runtime.sh background">
+            <param name="side" value="$(arg qianshi_side_validated)" type="str" />
+            <param name="bind_address" value="$(arg qianshi_udp_bind_address)" type="str" />
+            <param name="right_port" value="$(arg qianshi_udp_right_port)" type="int" />
+            <param name="left_port" value="$(arg qianshi_udp_left_port)" type="int" />
+            <rosparam param="left_module_map" subst_value="true">$(arg qianshi_udp_left_module_map)</rosparam>
+            <rosparam param="right_module_map" subst_value="true">$(arg qianshi_udp_right_module_map)</rosparam>
+            <param name="diagnostics" value="$(arg qianshi_udp_diagnostics)" type="bool" />
+            <param name="diagnostic_period" value="$(arg qianshi_udp_diagnostic_period)" type="double" />
+            <param name="restart_timeout" value="$(arg qianshi_udp_restart_timeout)" type="double" />
+            <param name="command_topic" value="$(arg qianshi_command_topic)" />
+            <param name="left_command_topic" value="$(arg qianshi_left_command_topic)" />
+            <param name="publish_real" value="$(arg qianshi_publish_real)" type="bool" />
+            <param name="real_command_topic" value="$(arg qianshi_real_command_topic)" />
+            <param name="emit_gesture_poses" value="$(arg qianshi_emit_gesture_poses)" type="bool" />
+        </node>
+        <node if="$(arg qianshi_use_mujoco)" pkg="sg100_glove_bridge"
+              type="sg100_mujoco_viewer_float.py" name="sg100_mujoco_viewer" output="screen"
+              launch-prefix="$(find wheel_arm_abs_vel)/scripts/whole_body_ik_runtime.sh background">
+            <param name="command_topic" value="$(arg qianshi_command_topic)" />
+            <param name="left_command_topic" value="$(arg qianshi_left_command_topic)" />
+            <param name="command_timeout" value="1.0" />
+        </node>
+    </group>
+
+    <!-- 拳师手势：bit0～bit3 捏合按键，bit4 交互模式，bit5 握拳启动。 -->
+    <node pkg="sg100_glove_bridge" type="glove_gesture_node.py" name="glove_gesture_node"
+          output="screen" required="true" if="$(arg qianshi_gestures_active)"
+          launch-prefix="$(find wheel_arm_abs_vel)/scripts/whole_body_ik_runtime.sh background"
+          args="--hz=$(arg glove_gesture_hz) --data-timeout=$(arg glove_gesture_data_timeout) --press-stable-sec=$(arg glove_gesture_press_stable_sec) --mode-hold-sec=$(arg glove_gesture_mode_hold_sec) --press-threshold=$(arg glove_gesture_press_threshold) --release-threshold=$(arg glove_gesture_release_threshold) --press-thumb-index=$(arg glove_gesture_thumb_index_press) --release-thumb-index=$(arg glove_gesture_thumb_index_release) --press-thumb-middle=$(arg glove_gesture_thumb_middle_press) --release-thumb-middle=$(arg glove_gesture_thumb_middle_release) --press-thumb-little=$(arg glove_gesture_thumb_little_press) --release-thumb-little=$(arg glove_gesture_thumb_little_release) --fist-distance-threshold=$(arg glove_gesture_fist_distance_threshold) --fist-release-threshold=$(arg glove_gesture_fist_release_threshold)">
+        <param name="calibration_enabled" value="$(arg glove_gesture_calibration_enable)" type="bool" />
+        <param name="calibration_file" value="$(arg glove_gesture_calibration_file)" type="str" />
+        <param name="calibration_backend" value="$(arg qianshi_backend_validated)" type="str" />
+        <rosparam param="calibration_left_module_map" subst_value="true">$(arg qianshi_udp_left_module_map)</rosparam>
+        <rosparam param="calibration_right_module_map" subst_value="true">$(arg qianshi_udp_right_module_map)</rosparam>
+        <param name="calibration_left_id" value="$(arg qianshi_left_id)" type="int" />
+        <param name="calibration_right_id" value="$(arg qianshi_right_id)" type="int" />
+    </node>
+</launch>

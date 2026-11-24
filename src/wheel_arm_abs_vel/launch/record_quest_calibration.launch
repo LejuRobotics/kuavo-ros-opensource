@@ -1,0 +1,18 @@
+<launch>
+  <!-- Run through record_quest_calibration.sh on its isolated ROS master. -->
+  <arg name="ip_address" />
+  <arg name="robot_version" default="400062" />
+  <arg name="output_prefix" default="$(env HOME)/.ros/quest_mount_calibration" />
+  <node pkg="wheel_arm_abs_vel" type="monitor_quest3_velocity.py"
+        name="quest_calibration_receiver" args="$(arg ip_address)" output="screen" required="true">
+    <env name="ROBOT_VERSION" value="$(arg robot_version)" />
+    <param name="qianshi_enabled" value="false" />
+    <param name="qianshi_gestures" value="false" />
+    <param name="start_state_server" value="false" />
+    <param name="enable_head_control" value="false" />
+    <param name="publish_quest3_globals" value="false" />
+    <param name="observation_tf_rate_hz" value="0.0" />
+  </node>
+  <node pkg="rosbag" type="record" name="quest_calibration_bag"
+        args="-o $(arg output_prefix) /leju_quest_bone_poses_raw /rosout" output="screen" />
+</launch>

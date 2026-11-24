@@ -324,6 +324,39 @@ def report_warnings(profile):
         sys.stderr.write('[runtime-partition][WARN] ' + warning + '\n')
 
 
+def glove_sdk_cpus(profile, allowed, sysroot=CPU_ROOT):
+    """Choose up to two separate physical background cores for the SDK."""
+    online = cpu_list((sysroot / 'online').read_text())
+    reserved = cpu_list((sysroot / 'isolated').read_text())
+    for role in ('wbc_cpus', 'driver_reserved_cpus', 'ik_cpus',
+                 'mapper_cpus', 'sidecar_cpus'):
+        reserved.update(profile.get(role, []))
+    candidates = set(profile['background_cpus']) & set(allowed) & online
+    selected = set()
+    for cpu in sorted(candidates, reverse=True):
+        siblings = cpu_list((sysroot / ('cpu%d/topology/thread_siblings_list' % cpu)).read_text())
+        if not siblings & (reserved | selected):
+            selected.add(cpu)
+            if len(selected) == 2:
+                break
+    if not selected:
+        raise ValueError('no CPU available for glove SDK outside protected and sidecar cores')
+    return sorted(selected)
+
+
+def exec_glove_sdk(command):
+    raw = os.environ.get('KUAVO_RUNTIME_PARTITION_JSON')
+    if os.environ.get('KUAVO_RUNTIME_PARTITION', '1') != '0' and raw:
+        allowed = os.sched_getaffinity(0)
+        limits = cgroup_cpu_limit()
+        cpus = glove_sdk_cpus(json.loads(raw), allowed if limits is None else allowed & limits)
+        os.sched_setscheduler(0, os.SCHED_OTHER, os.sched_param(0))
+        os.sched_setaffinity(0, cpus)
+        print('[runtime-partition] glove SDK and receiver CPUs=' + str(sorted(os.sched_getaffinity(0))),
+              file=sys.stderr, flush=True)
+    os.execvp(command[0], command)
+
+
 def inspect_profile():
     """Read-only preflight: no ROS import, affinity, scheduler, or file mutation."""
     online, isolated, siblings, capacities, frequencies = topology()
@@ -347,6 +380,9 @@ def inspect_profile():
 def main():
     if sys.argv[1:] == ['--check']:
         raise SystemExit(inspect_profile())
+    if sys.argv[1:2] == ['--glove-sdk']:
+        exec_glove_sdk(sys.argv[2:])
+        return
     command = sys.argv[1:]
     parent_launch = command[:1] == ['--launch']
     if parent_launch:

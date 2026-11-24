@@ -195,6 +195,11 @@ class PinocchioVelocityIk {
     std::cout << "MODEL=PINOCCHIO IK_LEVEL=VELOCITY QP=WEIGHTED_SINGLE SOLVER=PROXQP ELBOW=XYZ_SOFT SEW=OFF HQP=OFF SQP=OFF REFERENCE=D_STYLE_TRAPEZOIDAL" << std::endl;
 
 #ifndef VELOCITY_IK_OFFLINE_TEST
+    if (use_controller_startup_arm_pose_) {
+      controller_startup_arm_pose_sub_ = nh_.subscribe(
+          "/whole_body_velocity_ik/controller_startup_arm_pose", 1,
+          &PinocchioVelocityIk::controllerStartupArmPoseCallback, this);
+    }
     continuity_pub_ = nh_.advertise<std_msgs::Float64MultiArray>(
         "/whole_body_velocity_ik/diagnostics/continuity_v1", 2);
     manual_lower_service_ = nh_.advertiseService(
@@ -830,6 +835,7 @@ class PinocchioVelocityIk {
     session_posture_position_ = DecisionVector::Zero(dof);
     preparation_position_ = DecisionVector::Zero(dof);
     startup_preparation_position_ = DecisionVector::Zero(dof);
+    entry_preparation_position_ = DecisionVector::Zero(dof);
     velocity_limit_ = DecisionVector::Constant(dof, 4.0);
     acceleration_limit_ = DecisionVector::Constant(dof, 50.0);
   }
@@ -1329,6 +1335,7 @@ class PinocchioVelocityIk {
     load_lower_array("lower_joint_acceleration_cap",
                      &lower_joint_acceleration_cap_);
     std::vector<double> preparation_arm_position;
+    pnh_.param("use_controller_startup_arm_pose", use_controller_startup_arm_pose_, false);
     if (pnh_.getParam("preparation_arm_position", preparation_arm_position)) {
       if (preparation_arm_position.size() != kDualArmDof ||
           !std::all_of(preparation_arm_position.begin(),
@@ -5702,7 +5709,52 @@ class PinocchioVelocityIk {
 
   }
 
+  void controllerStartupArmPoseCallback(const sensor_msgs::JointState::ConstPtr& pose) {
+    if (!pose || !use_controller_startup_arm_pose_ ||
+        pose->header.frame_id != "robot_version/" + std::to_string(robot_version_) ||
+        pose->position.size() != kDualArmDof || pose->name.size() != kDualArmDof) {
+      ROS_ERROR_THROTTLE(2.0, "[VelocityIk] Rejecting controller startup pose with mismatched model/layout");
+      return;
+    }
+    for (int joint = 0; joint < kDualArmDof; ++joint) {
+      const int index = armDecisionIndex(joint / kJointsPerArm, joint % kJointsPerArm);
+      const double q = pose->position.at(joint);
+      if (pose->name.at(joint) != dof_layout_.decisionNames().at(index) ||
+          !std::isfinite(q) || q < joint_safe_lower_(index) || q > joint_safe_upper_(index)) {
+        ROS_ERROR_THROTTLE(2.0, "[VelocityIk] Rejecting controller startup pose outside the arm safety envelope or joint ordering");
+        return;
+      }
+    }
+    std::lock_guard<std::mutex> lock(controller_startup_arm_pose_mutex_);
+    if (controller_startup_arm_pose_) {
+      if (pose->position != controller_startup_arm_pose_->position)
+        ROS_ERROR_THROTTLE(2.0, "[VelocityIk] Controller startup arm pose changed; restart IK to adopt a new endpoint");
+      return;
+    }
+    controller_startup_arm_pose_ = pose;
+  }
+
   void publishOnce() {
+    if (use_controller_startup_arm_pose_ && !controller_startup_arm_pose_applied_) {
+      sensor_msgs::JointState::ConstPtr pose;
+      {
+        std::lock_guard<std::mutex> lock(controller_startup_arm_pose_mutex_);
+        pose = controller_startup_arm_pose_;
+      }
+      if (!pose) {
+        ROS_WARN_THROTTLE(2.0, "[VelocityIk] Waiting for the controller startup arm pose before acquiring IK authority");
+        return;
+      }
+      for (int joint = 0; joint < kDualArmDof; ++joint) {
+        const int index = armDecisionIndex(joint / kJointsPerArm, joint % kJointsPerArm);
+        preparation_position_(index) = pose->position.at(joint);
+        startup_preparation_position_(index) = pose->position.at(joint);
+      }
+      controller_startup_arm_pose_applied_ = true;
+      pnh_.setParam("resolved_preparation_position",
+          std::vector<double>(preparation_position_.data(), preparation_position_.data() + preparation_position_.size()));
+      ROS_INFO("[VelocityIk] PREPARE arms now use the controller startup pose");
+    }
     ++diagnostic_tick_;
     velocity_ik::runtime_probe::point(10);
     if(reference_transport_.shm()){
@@ -6438,9 +6490,36 @@ class PinocchioVelocityIk {
       state = tracking ? ShadowState::kTracking : ShadowState::kStaleBraking;
     }
     if (preparing && !manual_override) {
-      const DecisionVector& preparation_target = startup_preparing
+      DecisionVector preparation_target = startup_preparing
           ? startup_preparation_position_ : preparation_position_;
-      if (!preparation_active_) {
+      // PREPARED 仍持续发 CONTROL_PREPARE，preparation_active_ 不会自己清掉。
+      // 每次入口标志变化都要重选手臂目标，否则复位和进入增量都停在上一拍的角度。
+      bool use_entry_pose = false;
+      pnh_.getParamCached("use_incremental_entry_pose", use_entry_pose);
+      const bool retarget =
+          !preparation_active_ || use_entry_pose != incremental_entry_prepare_;
+      if (retarget) {
+        incremental_entry_prepare_ = use_entry_pose;
+        if (incremental_entry_prepare_) {
+          for (int arm = 0; arm < kArmCount; ++arm) {
+            for (int joint = 0; joint < kJointsPerArm; ++joint) {
+              const int index = armDecisionIndex(arm, joint);
+              const double requested = preparation_arm_position_requested_.at(
+                  static_cast<std::size_t>(arm * kJointsPerArm + joint));
+              preparation_target(index) = std::clamp(
+                  requested, joint_safe_lower_(index), joint_safe_upper_(index));
+            }
+          }
+          entry_preparation_position_ = preparation_target;
+          ROS_INFO("[VelocityIk] incremental entry moves arms to the launch ready pose");
+        } else if (preparation_active_) {
+          ROS_INFO("[VelocityIk] reset PREPARE returns arms to the startup pose");
+        }
+      }
+      if (incremental_entry_prepare_) {
+        preparation_target = entry_preparation_position_;
+      }
+      if (retarget) {
         // Input generation changes do not erase the executing trajectory.
         // Capture only on entry; repeated PREPARE packets must not restart it.
         preparation_entry_dq_ = reference_dq_;
@@ -6625,6 +6704,7 @@ class PinocchioVelocityIk {
       consecutive_solver_failures_ = 0;
     } else if (!contract_prepare) {
       preparation_active_ = false;
+      incremental_entry_prepare_ = false;
       preparation_complete_ = false;
       preparation_settle_cycles_ = 0;
       preparation_initial_error_ = 0.0;
@@ -7906,6 +7986,11 @@ class PinocchioVelocityIk {
   Eigen::VectorXd diagnostic_q_full_;
   ros::NodeHandle nh_;
   ros::NodeHandle pnh_;
+  ros::Subscriber controller_startup_arm_pose_sub_;
+  std::mutex controller_startup_arm_pose_mutex_;
+  sensor_msgs::JointState::ConstPtr controller_startup_arm_pose_;
+  bool use_controller_startup_arm_pose_{false};
+  bool controller_startup_arm_pose_applied_{false};
   ros::Subscriber target_sub_;
   ros::Subscriber robot_state_sub_;
   ros::Subscriber base_state_sub_;
@@ -8062,6 +8147,8 @@ class PinocchioVelocityIk {
   // Session-specific startup target: fixed ready arms plus the nearest safe
   // lower-body posture, avoiding an unrelated move to every safe centre.
   DecisionVector startup_preparation_position_;
+  DecisionVector entry_preparation_position_;
+  bool incremental_entry_prepare_{false};
   std::vector<double> preparation_arm_position_requested_{
       0.2617993878, 0.0, 0.0, -1.20, 0.0, 0.0, 0.0,
       0.2617993878, 0.0, 0.0, -1.20, 0.0, 0.0, 0.0};

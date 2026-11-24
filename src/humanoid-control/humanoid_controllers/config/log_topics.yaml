@@ -77,6 +77,13 @@ topics:
   - /sg100_hand_state            # SG100 灵巧手状态话题
   - /tag_world_pose
   - /leju_quest_bone_poses
+  # Glove/Quest calibration: preserve uncompensated poses and the active map.
+  - /leju_quest_bone_poses_raw
+  - /quest3/controller_calibration_status
+  - /quest3/controller_calibration_mapper_status
+  - /glove_gesture/.*
+  - /qianshi/glove_left/fingertips
+  - /qianshi/glove_right/fingertips
   - /robot_head_motion_data
   - /robot_waist_motion_data
   - /tag_data

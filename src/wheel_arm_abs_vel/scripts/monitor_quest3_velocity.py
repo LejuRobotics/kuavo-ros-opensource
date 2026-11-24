@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 import legacy_dependencies
+import copy
 import socket
 import sys
 import os
@@ -20,6 +21,7 @@ from geometry_msgs.msg import Point, Quaternion, PoseStamped
 import threading
 import queue
 from quest_input_buffer import LatestSample, SourceClockGate
+from glove_quest_input import connect as connect_glove_input
 from visualization_msgs.msg import Marker
 from tf2_msgs.msg import TFMessage
 from geometry_msgs.msg import TransformStamped
@@ -69,6 +71,31 @@ class Quest3BoneFramePublisher:
         self.listening_udp_ports_cnt = 0
 
         rospy.init_node('Quest3_bone_frame_publisher', anonymous=True)
+        self.glove_input = None
+        self.palm_offsets = {}
+        if rospy.get_param("~qianshi_gestures", False):
+            self.glove_input = connect_glove_input(rospy.get_param("~qianshi_gesture_timeout", 0.5))
+        from controller_mount_calibration import checked_calibration, status_json
+        calibration = checked_calibration(
+            rospy.get_param("/quest3/controller_calibration", {}),
+            rospy.get_param("~robot_version", os.environ.get("ROBOT_VERSION", "40"))
+        ) if rospy.get_param("~qianshi_enabled", False) else None
+        for side in ("Left", "Right"):
+            configured = rospy.get_param("~" + side.lower() + "_palm_to_controller_offset", [])
+            if configured == []:
+                configured = (calibration[side.lower()]["palm_to_controller_offset"]
+                              if calibration else [0.0] * 3)
+            offset = np.asarray(configured, dtype=float)
+            if offset.shape != (3,) or not np.isfinite(offset).all():
+                raise ValueError(side + " palm-to-controller offset requires three finite metres")
+            if np.any(offset):
+                self.palm_offsets[side] = offset
+
+        self.calibration_status_pub = rospy.Publisher(
+            "/quest3/controller_calibration_status", String, queue_size=1, latch=True)
+        self.calibration_status_pub.publish(
+            String(data=status_json(calibration, "receiver", self.palm_offsets)))
+
         self.publish_quest3_globals = bool(rospy.get_param('~publish_quest3_globals', True))
         self.start_state_server = bool(rospy.get_param('~start_state_server', True))
         self.connected_param = str(rospy.get_param('~connected_param', '') or '')
@@ -79,6 +106,8 @@ class Quest3BoneFramePublisher:
 
         self.br = tf.TransformBroadcaster()
         self.pose_pub = rospy.Publisher('/leju_quest_bone_poses', PoseInfoList, queue_size=2)
+        self.raw_pose_pub = rospy.Publisher('/leju_quest_bone_poses_raw', PoseInfoList, queue_size=2)
+        self._raw_pose_sample = None
         self.head_data_pub = rospy.Publisher('/robot_head_motion_data', robotHeadMotionData, queue_size=10)
         self.head_pose_pub = rospy.Publisher('/robot_head_pose', PoseStamped, queue_size=10)
         self.chest_data_pub = rospy.Publisher('/robot_chest_motion_data', Float64MultiArray, queue_size=10)
@@ -782,7 +811,7 @@ class Quest3BoneFramePublisher:
                 if not require_button_release:
                     # Publish every fresh button sample, separately from the
                     # overwriteable pose mailbox, preserving edges/duration.
-                    self.process_joystick_data(event, joy, count)
+                    self.process_joystick_data(event, joy, count, received)
                 else:
                     self.joysticks_pub.publish(joy)
                 self._pose_mailbox.put((
@@ -873,6 +902,8 @@ class Quest3BoneFramePublisher:
                 pose_info_list.is_high_confidence = event.IsDataHighConfidence
                 pose_info_list.is_hand_tracking = event.IsHandTracking
                 if pose_info_list.poses:
+                    if self._raw_pose_sample is not None:
+                        self.raw_pose_pub.publish(self._raw_pose_sample)
                     self.pose_pub.publish(pose_info_list)
                     self.publish_pose_tf(pose_info_list, received_ros, received, relative_age)
                     self._aux_mailbox.put((event, received_ros))
@@ -885,7 +916,7 @@ class Quest3BoneFramePublisher:
             except Exception as error:
                 rospy.logerr_throttle(1.0, "Quest pose conversion error: %s", error)
 
-    def process_joystick_data(self, event, joysticks_msg, loop_count):
+    def process_joystick_data(self, event, joysticks_msg, loop_count, received=None):
         joysticks_msg.left_x = event.left_joystick.x
         joysticks_msg.left_y = event.left_joystick.y
         joysticks_msg.left_trigger = event.left_joystick.trigger
@@ -904,6 +935,8 @@ class Quest3BoneFramePublisher:
         joysticks_msg.right_second_button_touched = event.right_joystick.secondButtonTouched
         # if loop_count % 20 == 0:
             # rospy.loginfo(joysticks_msg)
+        if self.glove_input is not None and not event.IsHandTracking:
+            self.glove_input.apply(joysticks_msg, time.monotonic() if received is None else received)
         self.joysticks_pub.publish(joysticks_msg)
 
     def add_transform_to_tf_message(self, tf_msg, time_now, bone_name, scaled_position, right_hand_quat):
@@ -941,6 +974,35 @@ class Quest3BoneFramePublisher:
             info.position = Point(x=position["x"], y=position["y"], z=position["z"])
             info.orientation = Quaternion(x=q[0], y=q[1], z=q[2], w=q[3])
             pose_info_list.poses.append(info)
+
+        # Record uncompensated data, even when an older calibration is active.
+        # Publication stays behind the same freshness check as the control sample.
+        self._raw_pose_sample = None
+        raw_pub = getattr(self, "raw_pose_pub", None)
+        if raw_pub is not None and raw_pub.get_num_connections():
+            raw = copy.deepcopy(pose_info_list)
+            raw.timestamp_ms = event.timestamp
+            raw.is_high_confidence = event.IsDataHighConfidence
+            raw.is_hand_tracking = event.IsHandTracking
+            self._raw_pose_sample = raw
+
+        # The stored vector is palm -> controller in the reported palm frame.
+        # Apply it to all associated hand bones before torso conversion and IK.
+        if not event.IsHandTracking:
+            for side, offset in getattr(self, "palm_offsets", {}).items():
+                index = self.bone_name_to_index[side + "HandPalm"]
+                if index >= len(pose_info_list.poses):
+                    continue
+                palm = pose_info_list.poses[index].orientation
+                rotation = tf.transformations.quaternion_matrix(
+                    [palm.x, palm.y, palm.z, palm.w])[:3, :3]
+                dx, dy, dz = rotation @ offset
+                for name, bone_index in self.bone_name_to_index.items():
+                    if name.startswith(side + "Hand") and bone_index < len(pose_info_list.poses):
+                        position = pose_info_list.poses[bone_index].position
+                        position.x -= dx
+                        position.y -= dy
+                        position.z -= dz
 
     def publish_pose_tf(self, poses, stamp, received, relative_age):
         now = time.monotonic()

@@ -17,7 +17,7 @@ from tools import runtime_timing_probe as runtime_probe
 from tools.noncontrol_publish_process import publisher as diagnostic_publisher
 from tools.arm_marker_process import MarkerProcess, TOPICS as ARM_MARKER_TOPICS
 import tf
-from std_msgs.msg import Float32MultiArray
+from std_msgs.msg import Float32MultiArray, String
 from tf.transformations import quaternion_from_matrix, quaternion_matrix
 from geometry_msgs.msg import TransformStamped,Twist
 from tf2_msgs.msg import TFMessage
@@ -324,6 +324,18 @@ class Quest3ArmInfoTransformer:
         from target_geometry_contract import LEGACY, WRIST, MODEL_FOREARM, validate_wrist_contract
         self.tcp_geometry_binding = rospy.get_param("/quest3/teleop_tcp/geometry_binding", {})
         self.tcp_geometry_mode = self.tcp_geometry_binding.get("operation_mode", LEGACY)
+        from controller_mount_calibration import checked_calibration, controller_rotations, status_json
+        calibration = checked_calibration(
+            rospy.get_param("/quest3/controller_calibration", {}),
+            os.environ.get("ROBOT_VERSION", "40"),
+            self.tcp_geometry_binding.get("ik_model", {}).get("model_sha256", "")
+        ) if rospy.get_param("~qianshi_enabled", False) else None
+        controller_rotations(self.tcp_source_to_tcp, calibration, quaternion_to_matrix)
+        self.calibration_status_pub = rospy.Publisher(
+            "/quest3/controller_calibration_mapper_status", String, queue_size=1, latch=True)
+        self.calibration_status_pub.publish(String(data=status_json(calibration, "absolute_mapper")))
+        if calibration:
+            rospy.loginfo("[Quest3 TCP] model-bound controller mounting calibration applied")
         self.tcp_wrist_contract = None
         if self.tcp_geometry_mode == WRIST:
             if rospy.get_param("/real", True):

@@ -116,6 +116,23 @@ class Topology(unittest.TestCase):
         self.assertEqual(profile, BASELINE)
         self.assertEqual(source, str(partition.DEFAULT_PROFILE))
 
+    def test_glove_sdk_uses_aaeon_background_outside_sidecar(self):
+        self.fixture('0-15', '2,3,7')
+        profile = partition.select_profile({}, 'x86_64', self.root,
+                                           cpu_model='Intel(R) Core(TM) Ultra 7 255H')[0]
+        self.assertEqual(partition.glove_sdk_cpus(profile, range(16), self.root), [12, 13])
+        self.assertEqual(partition.glove_sdk_cpus(profile, {8, 14, 15}, self.root), [8])
+        with self.assertRaisesRegex(ValueError, 'no CPU available'):
+            partition.glove_sdk_cpus(profile, {2, 3, 4, 5, 6, 7, 14, 15}, self.root)
+
+    def test_glove_sdk_excludes_smt_siblings_and_offline_cpus(self):
+        self.fixture('0-11', '2,7', {4: '4,9', 9: '4,9', 5: '5,6', 6: '5,6'})
+        profile = dict(wbc_cpus=[2], driver_reserved_cpus=[7], ik_cpus=[3],
+                       mapper_cpus=[4], sidecar_cpus=[10, 11],
+                       background_cpus=[0, 1, 5, 6, 8, 9, 12])
+        self.assertEqual(partition.glove_sdk_cpus(profile, range(13), self.root), [6, 8])
+        self.assertEqual(partition.glove_sdk_cpus(profile, {5, 6, 9, 10, 12}, self.root), [6])
+
     def test_fourteen_cpu_x86_without_separate_isolated_ik_is_rejected(self):
         self.fixture('0-13', '2,3,7')
         with self.assertRaisesRegex(ValueError, 'unavailable CPUs: ik_cpus'):
@@ -190,7 +207,7 @@ class Topology(unittest.TestCase):
         (scripts/'runtime_partition.py').write_text(
             "import os,sys,json\nprint(json.dumps([sys.argv[1:], "
             "os.environ['KUAVO_REQUIRE_IK_HARD_ISOLATION'], "
-            "os.environ['KUAVO_ARM_DRIVER_RESERVED_CPUS']]))\n")
+            "os.environ['KUAVO_ARM_DRIVER_RESERVED_CPUS'], os.environ['KUAVO_RUNTIME_ENTRY']]))\n")
         uname = self.root/'uname'
         uname.write_text('#!/bin/sh\necho aarch64\n')
         uname.chmod(0o755)
@@ -199,13 +216,17 @@ class Topology(unittest.TestCase):
         rospack.chmod(0o755)
         env = dict(os.environ, PATH=str(self.root)+':'+os.environ['PATH'],
                    KUAVO_RUNTIME_PARTITION='1', ROBOT_VERSION='62')
-        args = ['wheel_arm_abs_vel', 'control.launch', 'controller_type:=wheel_arm_abs_vel',
-                'require_ik_hard_isolation:=true', 'arm_driver_reserved_cpus:=5-7']
-        result = subprocess.check_output(
-            ['bash', str(ROOT/'scripts/platform_roslaunch.sh')] + args, env=env, text=True)
-        argv, strict, drivers = json.loads(result)
-        self.assertEqual(argv, ['--launch', '/usr/bin/env', 'roslaunch'] + args)
-        self.assertEqual((strict, drivers), ('true', '5-7'))
+        for launch in ('control.launch', 'quest_velocity_ik.launch', 'quest_windows_udp.launch'):
+            with self.subTest(launch=launch):
+                args = ['wheel_arm_abs_vel', launch,
+                        'require_ik_hard_isolation:=true', 'arm_driver_reserved_cpus:=5-7']
+                if launch == 'control.launch':
+                    args.append('controller_type:=wheel_arm_abs_vel')
+                result = subprocess.check_output(
+                    ['bash', str(ROOT/'scripts/platform_roslaunch.sh')] + args, env=env, text=True)
+                argv, strict, drivers, entry = json.loads(result)
+                self.assertEqual(argv, ['--launch', '/usr/bin/env', 'roslaunch'] + args)
+                self.assertEqual((strict, drivers, entry), ('true', '5-7', 'absolute'))
 
     def test_parent_launcher_x86_is_plain_roslaunch(self):
         for name, script in (

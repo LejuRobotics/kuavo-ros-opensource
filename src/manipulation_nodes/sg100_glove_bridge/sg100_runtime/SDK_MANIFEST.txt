@@ -1,0 +1,30 @@
+# sg100_runtime 文件来源清单
+
+来源: /home/chenzibo/下载/sg100_linux_20261028/sg100_linux
+(已验证版本, 整体目录 SHA-256 校验见原任务描述)
+
+## 一致性
+
+本目录内 sg100_native/*.py、sg100_native/model/*、tests/、
+requirements-sg100-native.*、run_sg100_native.sh、setup_sg100_native.sh、
+sg100_live_native.py 与原 20261028 版**逐字节一致** (cmp/sha256sum 核对,
+无任何算法修改)。
+
+## 有意未复制的原 SDK 文件 (与本链路无关)
+
+- sg100_native/dashboard.py, sg100_native/ui/, sg100_dashboard.py:
+  浏览器 Dashboard/前端 UI (正式仿真采用 MuJoCo)
+- sg100_native/driver.py, sg100_native_driver.py, run_sg100_native_driver.sh,
+  sg100_native/__main__.py: 独立驱动 CLI 入口
+- display/ 左右手 STL 网格: Meshcat 显示资源 (--no-viz 链路不加载)
+- tests/test_connection.py, test_dashboard.py, test_display.py,
+  test_driver.py, test_input.py, test_live_connection.py: 上述模块的测试
+- pyproject.toml, requirements-dev.txt, start_sg100.sh, sg100_linux_to_mujoco*.py:
+  开发/打包辅助; ROS 侧桥接由 scripts/sg100_glove_node.py 承担
+
+## 保留说明
+
+- display.py 保留: live.py 模块导入阶段引用 (from .display import HandVisualizer),
+  --no-viz 时仅完成导入, 不加载 Meshcat 网格。
+- requirements-sg100-native.lock.txt / .txt 保留: setup_sg100_native.sh
+  创建独立 venv 时使用 (Python 3.12 + Pinocchio 4.0.0)。

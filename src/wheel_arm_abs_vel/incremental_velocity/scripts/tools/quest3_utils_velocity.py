@@ -268,6 +268,9 @@ class Quest3ArmInfoTransformer:
                 "/quest3/teleop_tcp/right_palm_offset", [0.0, 0.0, 0.0]
             ), dtype=float),
         }
+        if (rospy.get_param("~qianshi_enabled", False) and
+                rospy.get_param("/quest3/controller_calibration/enabled", False)):
+            raise ValueError("Model-bound glove calibration requires teleop_mode:=absolute")
         self.tcp_source_to_tcp = {"controller": {}, "hand_tracking": {}}
         for side in ("Left", "Right"):
             if self.tcp_controller_rpy[side].shape != (3,):

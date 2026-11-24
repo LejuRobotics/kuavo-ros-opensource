@@ -560,6 +560,7 @@ class IkRos:
         self.use_arm_collision = rospy.get_param('~use_arm_collision', False)
         # Opt-in for wheel Quest/Pico launches; other users retain legacy gestures.
         self.dexhand_front_trigger = rospy.get_param("~dexhand_front_trigger", False)
+        self.qianshi_enabled = rospy.get_param("~qianshi_enabled", False)
         self.sg100_enabled = (rospy.get_param("~sg100_enabled", False)
                               and end_effector_type == "heiman")
         if self.sg100_enabled:
@@ -844,6 +845,11 @@ class IkRos:
         self._publish_absolute_enable_status()
         self._fixed_operation_state_pub = rospy.Publisher(
             '/quest3/pinocchio_arm_operation_state', Float64MultiArray, queue_size=1, latch=True)
+        if self.qianshi_enabled:
+            self._glove_following = False
+            self._glove_following_pub = rospy.Publisher(
+                '/glove_gesture/teleop_active', Bool, queue_size=1, latch=True)
+            self._glove_following_pub.publish(False)
         self._fixed_startup_pub = rospy.Publisher(
             '/whole_body_velocity_ik/diagnostics/startup_operation_v1',
             Float64MultiArray, queue_size=1, latch=True)
@@ -1590,6 +1596,17 @@ class IkRos:
         if hasattr(self, '_fixed_operation_state_pub'):
             mode = self._fixed_operation_mode()
             self._fixed_operation_state_pub.publish(Float64MultiArray(data=[float(mode), float(mode)]))
+        if hasattr(self, '_glove_following_pub'):
+            with self._absolute_lock:
+                following = (self._absolute_state == AbsoluteEnableState.ACTIVE
+                             and self._controller_start_completed
+                             and self._fixed_pending_operation is None
+                             and not self._fixed_arm_hold
+                             and (self._glove_following
+                                  or self._fixed_consumer_ack_locked(time.monotonic())))
+                if following != self._glove_following:
+                    self._glove_following = following
+                    self._glove_following_pub.publish(following)
         if hasattr(self, '_fixed_startup_pub'):
             with self._absolute_lock:
                 p = self._fixed_pending_operation

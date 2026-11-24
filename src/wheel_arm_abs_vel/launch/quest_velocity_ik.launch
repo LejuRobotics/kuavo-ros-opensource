@@ -1,7 +1,58 @@
 <?xml version='1.0' encoding='utf-8'?>
 <launch>
   <arg name="lock_knee_leg" default="false" />
-  <arg name="teleop_mode" default="absolute" doc="absolute or incremental (wrist anchor)" />
+  <arg name="hand_control_source" default="quest" doc="quest or qianshi (SG100 glove)" />
+  <arg name="qianshi_enabled" value="$(eval {'quest': False, 'qianshi': True}[arg('hand_control_source')])" />
+  <arg name="teleop_mode" default="$(eval 'incremental' if arg('qianshi_enabled') else 'absolute')" doc="absolute or incremental (wrist anchor)" />
+  <arg name="qianshi_backend" default="linux_sdk" doc="linux_sdk | windows_udp" />
+  <arg name="qianshi_hand_side" default="both" doc="left | right | both" />
+  <arg name="qianshi_side_validated" value="$(eval {'left': 'left', 'right': 'right', 'both': 'both'}[arg('qianshi_hand_side')])" />
+  <arg name="qianshi_udp_bind_address" default="0.0.0.0" />
+  <!-- Each hand multiplexes IKHand and SendDof on one UDP port. -->
+  <arg name="qianshi_udp_right_port" default="18002" />
+  <arg name="qianshi_udp_left_port" default="18003" />
+  <arg name="qianshi_udp_left_module_map" default="[]" />
+  <arg name="qianshi_udp_right_module_map" default="[]" />
+  <arg name="qianshi_udp_diagnostics" default="false" />
+  <arg name="qianshi_udp_diagnostic_period" default="2.0" />
+  <arg name="qianshi_udp_restart_timeout" default="2.0" />
+  <arg name="qianshi_auto_detect" default="true" />
+  <arg name="qianshi_detected_ports" default="" />
+  <arg name="qianshi_right_port" default="" />
+  <arg name="qianshi_baud" default="921600" />
+  <arg name="qianshi_left_id" default="12" />
+  <arg name="qianshi_right_id" default="2" />
+  <arg name="qianshi_sdk_python" default="" />
+  <arg name="qianshi_command_topic" default="/sg100_sim_hand_command" />
+  <arg name="qianshi_left_command_topic" default="/sg100_sim_left_hand_command" />
+  <arg name="qianshi_publish_real" default="true" />
+  <arg name="qianshi_real_command_topic" default="/sg100_hand_command" />
+  <arg name="qianshi_emit_gesture_poses" default="true" />
+  <arg name="qianshi_use_mujoco" default="false" />
+  <arg name="qianshi_glove_gesture_enable" default="true" />
+  <arg name="glove_gesture_calibration_enable" default="true" />
+  <arg name="glove_gesture_calibration_file"
+       default="$(find sg100_glove_bridge)/config/glove_gesture_calibration/active.yaml" />
+  <arg name="qianshi_gestures_active" value="$(eval arg('qianshi_enabled') and arg('qianshi_side_validated') == 'both' and arg('qianshi_glove_gesture_enable'))" />
+  <arg name="glove_gesture_msg_timeout" default="0.5" />
+  <arg name="glove_gesture_hz" default="50.0" />
+  <arg name="glove_gesture_data_timeout" default="0.5" />
+  <arg name="glove_gesture_press_stable_sec" default="0.1" />
+  <arg name="glove_gesture_mode_hold_sec" default="2.0" />
+  <arg name="glove_gesture_press_threshold" default="0.020" />
+  <arg name="glove_gesture_release_threshold" default="0.035" />
+  <arg name="glove_gesture_thumb_index_press" default="0.040" />
+  <arg name="glove_gesture_thumb_index_release" default="0.060" />
+  <arg name="glove_gesture_thumb_middle_press" default="0.040" />
+  <arg name="glove_gesture_thumb_middle_release" default="0.060" />
+  <arg name="glove_gesture_thumb_little_press" default="0.040" />
+  <arg name="glove_gesture_thumb_little_release" default="0.060" />
+  <arg name="glove_gesture_fist_distance_threshold" default="0.065" />
+  <arg name="glove_gesture_fist_release_threshold" default="0.085" />
+  <arg name="quest_controller_calibration_file" default="$(find wheel_arm_abs_vel)/config/quest_controller_calibration.yaml" />
+  <rosparam if="$(arg qianshi_enabled)" command="load" file="$(arg quest_controller_calibration_file)" />
+  <arg name="quest_left_palm_to_controller_offset" default="[]" doc="Empty inherits calibration; explicit [x,y,z] overrides translation only" />
+  <arg name="quest_right_palm_to_controller_offset" default="[]" />
   <arg name="external_quest_monitors" default="false"/>
   <arg name="torso_control_side" default="single" />
   <arg name="lb_grip_resume_duration" default="1.0" />
@@ -100,7 +151,7 @@
   <arg name="velocity_ik_joint_safe_center" default="[0.2617993878, 0.0, 0.0, -0.5235987756, 0.0, 0.0, 0.0, 0.2617993878, 0.0, 0.0, -0.5235987756, 0.0, 0.0, 0.0]" />
   <!-- Auto permits an explicit optical OK after X+A has completed PREPARE;
        the active session still locks its source until a fresh recapture. -->
-  <arg name="tracking_source_mode" default="$(eval 'controller' if arg('teleop_mode') == 'incremental' else 'auto')" />
+  <arg name="tracking_source_mode" default="$(eval 'controller' if arg('qianshi_enabled') or arg('teleop_mode') == 'incremental' else 'auto')" />
   <arg name="publish_tracking_mapping_debug" default="$(arg enable_vr_ik_debug)" />
   <arg name="record_task07_debug_bag" default="false" />
   <arg name="task07_debug_bag_dir" default="$(env HOME)/.ros/task07" />
@@ -123,11 +174,12 @@
   <arg name="control_finger_type" default="0" />
   <arg name="predict_gesture" default="false" />
   <arg name="ee_type" default="auto" doc="Read EndEffectorType from this robot version kuavo.json; optional explicit override" />
+  <arg name="mapper_ee_type" value="$(eval 'heiman' if arg('qianshi_enabled') else arg('ee_type'))" />
   <!-- Shared dual-arm transition uses the selected model's geometry and limits. -->
   <arg name="unlock_transition_enabled" default="$(eval int(arg('ctrl_arm_idx')) == 2)" doc="Enable the shared collision-checked transition for dual-arm control, independent of robot version and end-effector selection" />
   <arg name="unlock_tool_radius" default="" doc="Optional flange-to-TCP capsule radius in metres; empty retains the YAML default. Set to enclose the installed end effector." />
   <arg name="sg100_enabled" default="true" doc="Allow the shared end-effector resolver to start SG100 only for heiman; false explicitly disables it" />
-  <node pkg="wheel_arm_abs_vel" type="absolute_end_effector.py" name="sg100_mapper_bridge" args="--bridge --machine-mode=auto --config &quot;$(find kuavo_assets)/config/kuavo_v$(arg robot_version)/kuavo.json&quot; --ee-type=$(arg ee_type)" if="$(arg sg100_enabled)" output="screen" launch-prefix="$(eval find('wheel_arm_abs_vel') + '/scripts/whole_body_ik_runtime.sh background')" />
+  <node pkg="wheel_arm_abs_vel" type="absolute_end_effector.py" name="sg100_mapper_bridge" args="--bridge --machine-mode=auto --config &quot;$(find kuavo_assets)/config/kuavo_v$(arg robot_version)/kuavo.json&quot; --ee-type=$(arg ee_type)" if="$(eval arg('sg100_enabled') and not arg('qianshi_enabled'))" output="screen" launch-prefix="$(eval find('wheel_arm_abs_vel') + '/scripts/whole_body_ik_runtime.sh background')" />
   <!-- 头部指令由机器端 head_control_node 发布。 -->
   <arg name="enable_head_control" default="true" />
   <arg name="enable_terminal_start" default="false" />
@@ -217,7 +269,7 @@
   <arg name="min_reachable_distance" default="0.08" />
   <arg name="elbow_min_distance" default="0.16" />
   <arg name="elbow_max_distance" default="0.24" />
-  <arg name="use_incremental_hand_orientation" default="false" />
+  <arg name="use_incremental_hand_orientation" default="$(arg qianshi_enabled)" />
   <arg name="limit_shoulder_pitch_upper" default="false" />
   <arg name="shoulder_pitch_upper_limit" default="0.3" />
   <param name="/quest3/limit_shoulder_pitch_upper" value="$(arg limit_shoulder_pitch_upper)" type="bool" />
@@ -355,7 +407,7 @@
     <param name="temporal_cost/enabled" value="$(arg temporal_cost_enabled)" type="bool" />
     <param name="operating_diagnostics/enabled" value="$(arg operating_diagnostics_enabled)" type="bool" />
   </node>
-  <node pkg="wheel_arm_abs_vel" type="$(eval 'run_incremental_velocity.py' if arg('teleop_mode') == 'incremental' else 'ik_ros_velocity.py')" name="ik_ros_uni" args=" --version $(arg version) --ctrl_arm_idx $(arg ctrl_arm_idx) --ik_type_idx $(arg ik_type_idx) --control_torso=$(arg control_torso) --control_finger_type=$(arg control_finger_type) --predict_gesture=$(arg predict_gesture) --ee_type=$(arg ee_type) --hand_reference_mode=$(arg hand_reference_mode) --use_two_stage_ik=$(arg use_two_stage_ik)" output="screen" unless="$(arg use_cpp_incremental_ik)" respawn="false" launch-prefix="$(eval find('wheel_arm_abs_vel') + '/scripts/whole_body_ik_runtime.sh mapper')" required="true">
+  <node pkg="wheel_arm_abs_vel" type="$(eval 'run_incremental_velocity.py' if arg('teleop_mode') == 'incremental' else 'ik_ros_velocity.py')" name="ik_ros_uni" args=" --version $(arg version) --ctrl_arm_idx $(arg ctrl_arm_idx) --ik_type_idx $(arg ik_type_idx) --control_torso=$(arg control_torso) --control_finger_type=$(arg control_finger_type) --predict_gesture=$(arg predict_gesture) --ee_type=$(arg mapper_ee_type) --hand_reference_mode=$(arg hand_reference_mode) --use_two_stage_ik=$(arg use_two_stage_ik)" output="screen" unless="$(arg use_cpp_incremental_ik)" respawn="false" launch-prefix="$(eval find('wheel_arm_abs_vel') + '/scripts/whole_body_ik_runtime.sh mapper')" required="true">
     <param name="arm_move_threshold" value="$(arg arm_move_threshold)" if="$(eval arg('teleop_mode') == 'incremental')" />
     <param name="init_control_waist_enable" value="$(arg init_control_waist_enable)" if="$(eval arg('teleop_mode') == 'incremental')" />
     <param name="/ik_ros_uni_cpp_node/quest3/lock_knee_leg" value="$(arg lock_knee_leg)" if="$(eval arg('teleop_mode') == 'incremental')" />
@@ -402,7 +454,8 @@
     <param name="use_arm_collision" value="$(arg use_arm_collision)" />
     <param name="enable_ik_velocity_limit" value="$(arg enable_ik_velocity_limit)" type="bool" />
     <param name="enable_velocity_ik_takeover" value="$(arg enable_velocity_ik_takeover)" type="bool" />
-    <param name="sg100_enabled" value="$(arg sg100_enabled)" type="bool" />
+    <param name="sg100_enabled" value="$(eval arg('sg100_enabled') and not arg('qianshi_enabled'))" type="bool" />
+    <param name="qianshi_enabled" value="$(arg qianshi_enabled)" type="bool" />
     <param name="whole_body_shadow_isolate_position_ik" value="$(arg whole_body_shadow_isolate_position_ik)" type="bool" />
     <param name="enable_position_ik_status_log" value="$(arg enable_position_ik_status_log)" type="bool" />
     <param name="publish_tracking_mapping_debug" value="$(arg publish_tracking_mapping_debug)" type="bool" />
@@ -451,6 +504,12 @@
   <param name="use_pico" value="$(arg use_pico)" />
   <node pkg="wheel_arm_abs_vel" type="monitor_quest3_velocity.py" args="$(arg ip_address)" name="monitor_quest3" output="screen" if="$(eval arg('input_source') == 'quest' and not arg('external_quest_monitors') and not arg('use_cpp_monitor'))" launch-prefix="$(eval find('wheel_arm_abs_vel') + '/scripts/whole_body_ik_runtime.sh quest')">
     <param name="control_finger_tf_enabled" value="$(arg predict_gesture)" type="bool" />
+    <param name="qianshi_enabled" value="$(arg qianshi_enabled)" type="bool" />
+    <param name="robot_version" value="$(arg robot_version)" />
+    <param name="qianshi_gestures" value="$(arg qianshi_gestures_active)" type="bool" />
+    <param name="qianshi_gesture_timeout" value="$(arg glove_gesture_msg_timeout)" type="double" />
+    <rosparam if="$(arg qianshi_enabled)" param="left_palm_to_controller_offset" subst_value="true">$(arg quest_left_palm_to_controller_offset)</rosparam>
+    <rosparam if="$(arg qianshi_enabled)" param="right_palm_to_controller_offset" subst_value="true">$(arg quest_right_palm_to_controller_offset)</rosparam>
     <param name="enable_head_control" value="$(arg enable_head_control)" />
   </node>
   <node pkg="noitom_hi5_hand_udp_python" type="monitor_quest3_cpp" args="$(arg ip_address)" name="monitor_quest3_cpp" output="screen" if="$(eval arg('input_source') == 'quest' and not arg('external_quest_monitors') and arg('use_cpp_monitor'))" launch-prefix="$(eval find('wheel_arm_abs_vel') + '/scripts/whole_body_ik_runtime.sh background')">
@@ -481,6 +540,12 @@
   <arg name="absolute_launch_contract" value="$(eval {'supported': 'wheel_arm_abs_vel_s62'}['supported' if (int(arg('robot_version')) > 0 and arg('wheel_ik') and arg('enable_velocity_ik_takeover') and not arg('use_cpp_incremental_ik') and not arg('use_arm_only_ik') and not arg('legacy_pico_profile')) else 'Private absolute input requires a validated full wheel model wheel_ik=true takeover=true; incremental/arm-only/legacy profiles are unsupported'])" />
   <arg name="dual_input_contract" value="$(eval {True: True}[not arg('external_quest_monitors') or (arg('teleop_mode') == 'incremental' and arg('input_source') == 'quest' and arg('torso_control_side') in ['left', 'right'] and not arg('use_cpp_monitor'))])" />
   <arg name="incremental_mode_contract" value="$(eval {'ok': 'ok'}['ok' if arg('teleop_mode') == 'absolute' or (arg('teleop_mode') == 'incremental' and not arg('use_cpp_incremental_ik') and arg('wheel_ik') and arg('enable_velocity_ik_takeover')) else 'Incremental velocity requires wheel_ik=true, takeover=true and use_cpp_incremental_ik=false'])" />
+
+  <arg name="qianshi_launch_contract" value="$(eval {'ok': 'ok'}['ok' if not arg('qianshi_enabled') or (arg('input_source') == 'quest' and not arg('external_quest_monitors') and not arg('use_cpp_monitor') and arg('tracking_source_mode') == 'controller' and arg('ee_type') in ['auto', 'heiman']) else 'qianshi requires the single Python Quest monitor, controller tracking and SG100 (ee_type=auto or heiman)'])" />
+  <group if="$(arg qianshi_enabled)">
+    <param name="/qianshi_end_effector" type="str" command="/usr/bin/python3 $(find wheel_arm_abs_vel)/scripts/glove_quest_input.py --check-config &quot;$(find kuavo_assets)/config/kuavo_v$(arg robot_version)/kuavo.json&quot;" />
+    <include file="$(find wheel_arm_abs_vel)/launch/qianshi_glove.launch" pass_all_args="true" />
+  </group>
 
   <group if="$(eval arg('teleop_mode') == 'incremental')">
     <param name="/ik_ros_uni_cpp_node/quest3/lb_grip_resume_duration" value="$(arg lb_grip_resume_duration)" type="double" />

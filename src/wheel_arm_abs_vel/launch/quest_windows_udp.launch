@@ -1,0 +1,27 @@
+<launch>
+  <!-- Dedicated Windows glove entry. Other entrypoints keep their own policy. -->
+  <arg name="ip_address" doc="Quest headset IP address" />
+  <arg name="robot_version" default="$(optenv ROBOT_VERSION UNCONFIGURED_ROBOT_VERSION)" />
+  <arg name="glove_ik_freshness_timeout" default="0.5" />
+  <arg name="quest_controller_calibration_file" default="$(find wheel_arm_abs_vel)/config/quest_controller_calibration.yaml" />
+  <arg name="teleop_mode" default="absolute" />
+  <arg name="hand_control_source" default="qianshi" />
+  <arg name="qianshi_backend" default="windows_udp" />
+  <arg name="qianshi_hand_side" default="both" />
+  <arg name="qianshi_glove_gesture_enable" default="true" />
+  <arg name="qianshi_udp_left_module_map" default="[A,B,C,D,E]" />
+  <arg name="qianshi_udp_right_module_map" default="[A,B,C,D,E]" />
+  <!-- Evaluated while parsing, before any node can start or send commands. -->
+  <param name="/windows_glove_entry/preflight" type="str"
+         command="/usr/bin/python3 $(find wheel_arm_abs_vel)/scripts/windows_glove_entry_check.py --robot-version=$(arg robot_version) --calibration-file=&quot;$(arg quest_controller_calibration_file)&quot; --teleop-mode=$(arg teleop_mode) --hand-control-source=$(arg hand_control_source) --backend=$(arg qianshi_backend) --freshness-timeout=$(arg glove_ik_freshness_timeout)" />
+  <param name="/sg100_windows_udp/windows_entry_safety" value="true" type="bool" />
+  <param name="/sg100_windows_udp/ik_freshness_timeout" value="$(arg glove_ik_freshness_timeout)" type="double" />
+  <param name="/glove_gesture_node/suppress_fist_pinches" value="true" type="bool" />
+  <group>
+    <!-- Environment scope prevents leftover ROS parameters affecting other launches. -->
+    <env name="KUAVO_WINDOWS_GLOVE_ENTRY" value="1" />
+    <include file="$(find wheel_arm_abs_vel)/launch/quest_velocity_ik.launch" pass_all_args="true">
+      <arg name="ip_address" value="$(arg ip_address)" />
+    </include>
+  </group>
+</launch>
