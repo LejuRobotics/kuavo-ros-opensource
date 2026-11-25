@@ -59,6 +59,7 @@ class JoyStickHandler {
   bool isRightFirstButtonPressed() const;
   bool isLeftSecondButtonPressed() const;
   bool isRightSecondButtonPressed() const;
+  bool isSg100GestureStickNeutral() const;
   bool isLeftFirstButtonTouched() const;
   bool isLeftSecondButtonTouched() const;
   bool isRightFirstButtonTouched() const;
@@ -100,6 +101,7 @@ class JoyStickHandler {
   bool leftSecondButtonPressed_;
   bool leftSecondButtonTouched_;
   bool leftFirstButtonTouched_;
+  bool sg100GestureStickNeutral_ = false;
   bool leftFirstButtonPressed_;  // 左手第一个按键按下状态
   bool rightSecondButtonPressed_;
   bool rightFirstButtonTouched_;

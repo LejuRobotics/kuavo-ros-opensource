@@ -46,7 +46,7 @@ void SG100VrGestureClient::loop() {
       }
       had_fresh_input = false;
       pending_dir_ = 0;
-      debounce_ = false;
+      debounce_ = true;
       rate.sleep();
       continue;
     }
@@ -58,7 +58,7 @@ void SG100VrGestureClient::loop() {
       trigger_pub_.publish(std_msgs::Float32MultiArray{});
       had_fresh_input = false;
       pending_dir_ = 0;
-      debounce_ = false;
+      debounce_ = true;
       ROS_WARN_THROTTLE(1.0, "[SG100VrGestureClient] invalid trigger; pausing commands");
       rate.sleep();
       continue;
@@ -79,35 +79,29 @@ void SG100VrGestureClient::checkVrGestureSwitch() {
   }
   const ros::WallTime now = ros::WallTime::now();
 
-  const bool x_touched = vr_.left_first_touched();
-  if (!x_touched) {
+  const bool x = vr_.left_first_touched();
+  const bool y = vr_.left_second_touched();
+  const bool a = vr_.right_first_touched();
+  const bool b = vr_.right_second_touched();
+  const bool pressed = vr_.left_first_pressed() || vr_.left_second_pressed() ||
+                       vr_.right_first_pressed() || vr_.right_second_pressed();
+  // Complete release is required after a switch or cancellation.
+  if (!x && !y && !a && !b && !pressed) {
     pending_dir_ = 0;
     debounce_ = false;
     return;
   }
-
-  int direction = 0;
-  bool btn_pressed = false;
-  if (vr_.right_first_touched()) {
-    direction = 1;
-    btn_pressed = vr_.right_first_pressed();
-  } else if (vr_.right_second_touched()) {
-    direction = -1;
-    btn_pressed = vr_.right_second_pressed();
-  } else {
+  if (x || pressed || (a && b) || !vr_.sticks_neutral()) {
     pending_dir_ = 0;
-    debounce_ = false;
+    debounce_ = true;
     return;
   }
-
-  if (vr_.left_first_pressed() && btn_pressed) {
+  if (debounce_) return;
+  if (!y || a == b) {
     pending_dir_ = 0;
     return;
   }
-
-  if (debounce_) {
-    return;
-  }
+  const int direction = a ? 1 : -1;
 
   if (pending_dir_ != direction) {
     pending_dir_ = direction;

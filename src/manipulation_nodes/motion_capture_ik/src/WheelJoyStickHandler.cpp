@@ -45,6 +45,8 @@ void WheelJoyStickHandler::initialize() {
   rightGrip_ = false;
   leftSecondButtonPressed_ = false;
   leftFirstButtonTouched_ = false;
+  leftSecondButtonTouched_ = false;
+  sg100GestureStickNeutral_ = false;
   leftFirstButtonPressed_ = false;
   rightSecondButtonPressed_ = false;
   rightSecondButtonTouched_ = false;
@@ -107,6 +109,8 @@ void WheelJoyStickHandler::reset() {
   rightGrip_ = false;
   leftSecondButtonPressed_ = false;
   leftFirstButtonTouched_ = false;
+  leftSecondButtonTouched_ = false;
+  sg100GestureStickNeutral_ = false;
   leftFirstButtonPressed_ = false;
   rightSecondButtonPressed_ = false;
   rightSecondButtonTouched_ = false;
@@ -319,7 +323,13 @@ void WheelJoyStickHandler::updateJoyStickData(const noitom_hi5_hand_udp_python::
 
   // 更新按钮状态
   leftSecondButtonPressed_ = msg->left_second_button_pressed;
+  // Use raw axes, not filtered movement commands, for gesture safety.
+  sg100GestureStickNeutral_ = std::isfinite(msg->left_x) && std::isfinite(msg->left_y) &&
+      std::isfinite(msg->right_x) && std::isfinite(msg->right_y) &&
+      std::abs(msg->left_x) <= 0.1 && std::abs(msg->left_y) <= 0.1 &&
+      std::abs(msg->right_x) <= 0.1 && std::abs(msg->right_y) <= 0.1;
   leftFirstButtonTouched_ = msg->left_first_button_touched;
+  leftSecondButtonTouched_ = msg->left_second_button_touched;
   leftFirstButtonPressed_ = msg->left_first_button_pressed;
   rightSecondButtonPressed_ = msg->right_second_button_pressed;
   rightSecondButtonTouched_ = msg->right_second_button_touched;
@@ -686,6 +696,16 @@ bool WheelJoyStickHandler::isLeftSecondButtonPressed() const {
 bool WheelJoyStickHandler::isRightSecondButtonPressed() const {
   std::lock_guard<std::mutex> lock(dataMutex_);
   return rightSecondButtonPressed_;
+}
+
+bool WheelJoyStickHandler::isSg100GestureStickNeutral() const {
+  std::lock_guard<std::mutex> lock(dataMutex_);
+  return sg100GestureStickNeutral_;
+}
+
+bool WheelJoyStickHandler::isLeftSecondButtonTouched() const {
+  std::lock_guard<std::mutex> lock(dataMutex_);
+  return leftSecondButtonTouched_;
 }
 
 bool WheelJoyStickHandler::isLeftFirstButtonTouched() const {

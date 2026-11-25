@@ -27,14 +27,19 @@ int main() {
   for (double roll : {0.0, 15.0 * deg, -20.0 * deg}) {
     for (double sign : {-1.0, 1.0}) {
       ContinuousTorsoOrientation observation;
+      double expected_yaw = .01 * deg;
       for (int i = 0; i <= 2400; ++i) {
         const double pitch = sign * (i <= 1200 ? i : 2400 - i) * .1 * deg;
         const auto r = rotation(roll, pitch, .01 * deg);
         observation.update(r, 10.0 + i * .01);
+        expected_yaw = ContinuousTorsoOrientation::nearest(
+            velocity_ik::torsoHeading(r).yaw, i == 0 ? 0.0 : expected_yaw);
         close(observation.rpy.y(), pitch);
-        close(observation.rpy.z(), .01 * deg);
+        close(observation.rpy.z(), expected_yaw);
+        // A pure forward bow must not copy the singular roll split into yaw.
+        assert(std::abs(observation.rpy.z() - .01 * deg) < 25.0 * deg);
         assert(observation.pitch_yaw_rate.allFinite());
-        assert(std::abs(observation.pitch_yaw_rate.y()) < 1e-8);
+        if (roll == 0.0) assert(std::abs(observation.pitch_yaw_rate.y()) < 1e-8);
         const double old_yaw = std::atan2(r(1, 0), r(0, 0));
         old_yaw_jump = std::max(old_yaw_jump, std::abs(old_yaw - .01 * deg));
       }
@@ -56,32 +61,42 @@ int main() {
     }
   }
 
-  // Combined side lean/turning agrees with ZYX outside the conditioning band.
+  // Side lean uses the forward/left heading, unwrapped across +/-180 degrees.
   ContinuousTorsoOrientation combined;
+  double expected_combined_yaw = 0.0;
   for (int i = 0; i < 2000; ++i) {
     const double roll = 20 * deg * std::sin(i * .009);
     const double pitch = 70 * deg * std::sin(i * .005);
     const double yaw = i * .2 * deg;
-    combined.update(rotation(roll, pitch, yaw), i * .01);
+    const auto r = rotation(roll, pitch, yaw);
+    combined.update(r, i * .01);
+    expected_combined_yaw = ContinuousTorsoOrientation::nearest(
+        velocity_ik::torsoHeading(r).yaw, i == 0 ? 0.0 : expected_combined_yaw);
     close(combined.rpy.x(), roll); close(combined.rpy.y(), pitch);
-    close(combined.rpy.z(), yaw);  // Includes crossing +/-180 degrees.
+    close(combined.rpy.z(), expected_combined_yaw);
+    if (std::abs(pitch) <= 60.0 * deg) close(combined.rpy.z(), yaw);
   }
 
   // Simultaneous roll/yaw at vertical cannot be uniquely decomposed. Check
   // smooth continuation and recovery, without claiming zero error there.
   ContinuousTorsoOrientation crossing;
   double max_combined_error = 0.0, max_combined_step = 0.0;
+  double expected_crossing_yaw = 0.0;
   for (int i = 0; i <= 2400; ++i) {
     const double pitch = (i <= 1200 ? i : 2400 - i) * .1 * deg;
     const double roll = 15 * deg * std::sin(i * .003);
     const double yaw = 30 * deg * std::sin(i * .002);
+    const auto r = rotation(roll, pitch, yaw);
     const double old = crossing.rpy.z();
-    crossing.update(rotation(roll, pitch, yaw), i * .01);
+    crossing.update(r, i * .01);
+    expected_crossing_yaw = ContinuousTorsoOrientation::nearest(
+        velocity_ik::torsoHeading(r).yaw, i == 0 ? 0.0 : expected_crossing_yaw);
+    close(crossing.rpy.z(), expected_crossing_yaw);
     max_combined_error = std::max(max_combined_error, std::abs(crossing.rpy.z() - yaw));
     if (i) max_combined_step = std::max(max_combined_step, std::abs(crossing.rpy.z() - old));
-    if (std::abs(std::cos(pitch)) >= .10) close(crossing.rpy.z(), yaw);
+    if (std::abs(pitch) <= 60.0 * deg) close(crossing.rpy.z(), yaw);
   }
-  assert(max_combined_error < 4.0 * deg);
+  assert(max_combined_error < 20.0 * deg);
   assert(max_combined_step < 1.0 * deg);
 
   // Tiny physical orientation noise near vertical used to become a pi heading

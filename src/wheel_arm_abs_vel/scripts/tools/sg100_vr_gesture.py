@@ -1,4 +1,5 @@
 """Touch confirmation for SG100; service calls run outside joystick callbacks."""
+import math
 import queue
 import threading
 import time
@@ -17,25 +18,35 @@ class GestureTouchGate:
     def update(self, msg, valid, now):
         if not valid or (self.last_packet is not None and now - self.last_packet > .15):
             self.reset()
+            self.latched = True
         if not valid:
             return 0
         self.last_packet = now
-        direction = (1 if msg.right_first_button_touched else
-                     -1 if msg.right_second_button_touched else 0)
-        pressed = (msg.right_first_button_pressed if direction == 1 else
-                   msg.right_second_button_pressed)
-        if not msg.left_first_button_touched or not direction:
+        x = bool(msg.left_first_button_touched)
+        y = bool(msg.left_second_button_touched)
+        a = bool(msg.right_first_button_touched)
+        b = bool(msg.right_second_button_touched)
+        pressed = any((msg.left_first_button_pressed, msg.left_second_button_pressed,
+                       msg.right_first_button_pressed, msg.right_second_button_pressed))
+        sticks = (msg.left_x, msg.left_y, msg.right_x, msg.right_y)
+        neutral = all(math.isfinite(v) and abs(v) <= .1 for v in sticks)
+        if not any((x, y, a, b, pressed)):
             self.reset()
             return 0
-        if msg.left_first_button_pressed and pressed:
+        if x or pressed or (a and b) or not neutral:
             self.started = None
+            self.latched = True
             return 0
         if self.latched:
             return 0
+        if not y or a == b:
+            self.started = None
+            return 0
+        direction = 1 if a else -1
         if direction != self.direction or self.started is None:
             self.direction, self.started = direction, now
             return 0
-        if now - self.started < .3:
+        if now - self.started < .8:
             return 0
         self.latched = True
         return direction
