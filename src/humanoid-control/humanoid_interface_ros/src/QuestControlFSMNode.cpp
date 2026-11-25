@@ -799,6 +799,12 @@ namespace ocs2
             accumulated_yaw_offset_ = 0.0;
             torso_control_start_time_ = ros::Time(0);
 
+            // 退出 VR 时清掉低时延留下的 WBC 手臂轨迹标志。该标志活在仍在运行的
+            // humanoidController 里，只关掉 VR 节点不会自动置 0；残留会使后续
+            // G12 动作在 Phase2 入口用到过期的 /kuavo_arm_traj（kuavodevlab#5064）。
+            // 必须放在「腰部是否曾使能」判断之外：#5064 复现时腰部控制已经是关闭的。
+            callEnableWbcArmTrajectorySrv(0);
+
             res.success = true;
             res.message = was_torso_control_enabled ? "Torso control disabled (VR node shutdown reset)"
                                                    : "Torso control already disabled (VR node shutdown reset)";
