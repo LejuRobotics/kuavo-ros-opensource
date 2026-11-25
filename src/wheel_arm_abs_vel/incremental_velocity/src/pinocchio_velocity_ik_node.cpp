@@ -44,6 +44,7 @@
 #include <stdexcept>
 #include <string>
 #include <thread>
+#include <tuple>
 #include <vector>
 
 #include <Eigen/Core>
@@ -400,7 +401,10 @@ class PinocchioVelocityIk {
     Eigen::Vector3d hand_linear_ff{Eigen::Vector3d::Zero()};
     Eigen::Vector3d hand_angular_ff{Eigen::Vector3d::Zero()};
     Eigen::Vector3d elbow_linear_ff{Eigen::Vector3d::Zero()};
+    Eigen::Vector3d link6_position{Eigen::Vector3d::Zero()};
+    Eigen::Vector3d link6_linear_ff{Eigen::Vector3d::Zero()};
     bool elbow_valid{false};
+    bool wrist_rotation_only{false};
   };
 
   struct WorkspaceProjection {
@@ -1202,6 +1206,8 @@ class PinocchioVelocityIk {
     pnh_.param("elbow_position_gain", elbow_position_gain_, 5.0);
     pnh_.param("hand_position_weight", hand_position_weight_, 12.0);
     pnh_.param("hand_orientation_weight", hand_orientation_weight_, 6.0);
+    pnh_.param("wrist_rotation_only_proximal_weight",
+               wrist_rotation_only_proximal_weight_, 0.60);
     // The elbow is a redundancy preference only.  A low default prevents the
     // human elbow hint from pulling the primary 6-D TCP task away from target.
     pnh_.param("elbow_position_weight", elbow_position_weight_, 0.15);
@@ -1657,6 +1663,8 @@ class PinocchioVelocityIk {
         std::max(1.0e-6, primary_regularization_weight_);
     primary_regularization_max_weight_ = std::max(
         primary_regularization_weight_, primary_regularization_max_weight_);
+    wrist_rotation_only_proximal_weight_ =
+        std::max(0.0, wrist_rotation_only_proximal_weight_);
     lower_body_posture_weight_ = std::max(0.0, lower_body_posture_weight_);
     lower_body_recruited_posture_weight_ =
         std::max(0.0, lower_body_recruited_posture_weight_);
@@ -2446,11 +2454,14 @@ class PinocchioVelocityIk {
     for (int arm = 0; arm < kArmCount; ++arm) {
       const auto& pose = *pose_input.at(arm);
       const auto& elbow = *elbow_input.at(arm);
+      const auto& link6 = message->link6_position[arm];
       next.arm.at(arm).hand_position =
           Eigen::Vector3d(pose.position.x, pose.position.y, pose.position.z);
       next.arm.at(arm).hand_orientation = Eigen::Quaterniond(
           pose.orientation.w, pose.orientation.x, pose.orientation.y, pose.orientation.z);
       next.arm.at(arm).elbow_position = Eigen::Vector3d(elbow.x, elbow.y, elbow.z);
+      next.arm.at(arm).link6_position =
+          Eigen::Vector3d(link6.x, link6.y, link6.z);
       next.arm.at(arm).elbow_valid = elbow_valid.at(arm) &&
           allFinite(next.arm.at(arm).elbow_position);
       const bool this_pose_valid = message->estimated_twists_valid && pose_valid.at(arm) &&
@@ -2467,6 +2478,26 @@ class PinocchioVelocityIk {
       }
       hand_valid[arm]=this_pose_valid && next.arm[arm].hand_linear_ff.allFinite()
           && next.arm[arm].hand_angular_ff.allFinite();
+      const bool rotation_only_held = next.clutch_hold[arm] || next.arm_hold ||
+          message->robot_hold_target[arm];
+      const bool rotation_only_requested = message->wrist_rotation_only[arm];
+      if (rotation_only_requested && !rotation_only_held &&
+          (!incremental_geometry_ || !next.arm[arm].link6_position.allFinite())) {
+        ++rejected_invalid_count_;
+        source_interrupted_ = true;
+        return;
+      }
+      next.arm[arm].wrist_rotation_only =
+          rotation_only_requested && !rotation_only_held;
+      next.arm[arm].link6_linear_ff.setZero();
+      if (!next.arm[arm].wrist_rotation_only &&
+          !next.arm[arm].link6_position.allFinite())
+        next.arm[arm].link6_position.setZero();
+      if (next.arm[arm].wrist_rotation_only) {
+        next.arm[arm].hand_linear_ff.setZero();
+        next.arm[arm].elbow_valid = false;
+        next.arm[arm].elbow_linear_ff.setZero();
+      }
       if (armIsControlled(arm)) {
         valid = valid && hand_valid[arm];
       }
@@ -2598,6 +2629,16 @@ class PinocchioVelocityIk {
           next.arm[arm].elbow_valid=false;
           hand_valid[arm]=true;
         }
+        if (next.clutch_hold[arm] || next.arm_hold ||
+            message->robot_hold_target[arm]) {
+          next.arm[arm].wrist_rotation_only = false;
+          next.arm[arm].link6_linear_ff.setZero();
+        }
+        if (next.arm[arm].wrist_rotation_only) {
+          next.arm[arm].hand_linear_ff.setZero();
+          next.arm[arm].elbow_valid = false;
+          next.arm[arm].elbow_linear_ff.setZero();
+        }
       }
       if (new_observation && next.body.torsoValid()) next.observation_ns[2]=observed_ns;
       else if (same_contract && target_.observation_ns[2]>0.) next.body=target_.body;
@@ -2653,6 +2694,15 @@ class PinocchioVelocityIk {
         max_orientation_delta = std::max(
             max_orientation_delta,
             rotationLog((q_new * q_old.conjugate()).toRotationMatrix()).norm());
+        if (next.arm.at(arm).wrist_rotation_only !=
+            target_.arm.at(arm).wrist_rotation_only) {
+          max_position_delta = std::numeric_limits<double>::infinity();
+        } else if (next.arm.at(arm).wrist_rotation_only) {
+          max_position_delta = std::max(
+              max_position_delta,
+              (next.arm.at(arm).link6_position -
+               target_.arm.at(arm).link6_position).norm());
+        }
         if (next.arm.at(arm).elbow_valid != target_.arm.at(arm).elbow_valid) {
           max_position_delta = std::numeric_limits<double>::infinity();
         } else if (next.arm.at(arm).elbow_valid) {
@@ -3409,9 +3459,11 @@ class PinocchioVelocityIk {
         source.hand_orientation;
     result.hand_orientation.normalize();
     result.elbow_position = transform * source.elbow_position;
+    result.link6_position = transform * source.link6_position;
     result.hand_linear_ff = transform.linear() * source.hand_linear_ff;
     result.hand_angular_ff = transform.linear() * source.hand_angular_ff;
     result.elbow_linear_ff = transform.linear() * source.elbow_linear_ff;
+    result.link6_linear_ff = transform.linear() * source.link6_linear_ff;
     return result;
   }
 
@@ -3613,9 +3665,12 @@ class PinocchioVelocityIk {
       target.hand_orientation.normalize();
       target.elbow_position =
           rotation * target.elbow_position + translation;
+      target.link6_position =
+          rotation * target.link6_position + translation;
       target.hand_linear_ff = rotation * target.hand_linear_ff;
       target.hand_angular_ff = rotation * target.hand_angular_ff;
       target.elbow_linear_ff = rotation * target.elbow_linear_ff;
+      target.link6_linear_ff = rotation * target.link6_linear_ff;
     }
     result.body_intent = body_intent;
     result.body_intent.desired_base_translation =
@@ -4250,12 +4305,21 @@ class PinocchioVelocityIk {
       const auto pose = plant_->GetFrameByName(hand_frame_names_.at(arm))
           .CalcPose(*plant_context_, torso);
       const auto& goal = target.arm.at(arm);
-      const Eigen::Vector3d ep = goal.hand_position - pose.translation();
+      const std::string translation_frame = goal.wrist_rotation_only
+          ? (arm == 0 ? "zarm_l6_link" : "zarm_r6_link")
+          : hand_frame_names_.at(arm);
+      const Eigen::Vector3d translation_position = goal.wrist_rotation_only
+          ? plant_->GetFrameByName(translation_frame)
+                .CalcPose(*plant_context_, torso).translation()
+          : pose.translation();
+      const Eigen::Vector3d translation_goal = goal.wrist_rotation_only
+          ? goal.link6_position : goal.hand_position;
+      const Eigen::Vector3d ep = translation_goal - translation_position;
       const Eigen::Vector3d er = rotationLog(
           goal.hand_orientation.toRotationMatrix() *
           pose.rotation().matrix().transpose());
       const DecisionJacobian3d jp = frameTranslationJacobianRelative(
-          hand_frame_names_.at(arm), torso_frame_name_);
+          translation_frame, torso_frame_name_);
       const DecisionJacobian3d jr = frameAngularJacobianRelative(
           hand_frame_names_.at(arm), torso_frame_name_);
       const auto budget_twist=[&](Eigen::Vector3d velocity,double slow) -> Eigen::Vector3d {
@@ -4268,7 +4332,9 @@ class PinocchioVelocityIk {
         if (catchup_correction && velocity.norm()>cap) velocity*=cap/velocity.norm();
         return velocity;
       };
-      const Eigen::Vector3d vp = budget_twist(ff_scale * goal.hand_linear_ff + bounded_correction(hand_position_gain_ * ep,acquisition_linear_speed_),acquisition_linear_speed_);
+      const Eigen::Vector3d translation_ff = goal.wrist_rotation_only
+          ? goal.link6_linear_ff : goal.hand_linear_ff;
+      const Eigen::Vector3d vp = budget_twist(ff_scale * translation_ff + bounded_correction(hand_position_gain_ * ep,acquisition_linear_speed_),acquisition_linear_speed_);
       const Eigen::Vector3d vr = budget_twist(ff_scale * goal.hand_angular_ff + bounded_correction(hand_orientation_gain_ * er,acquisition_angular_speed_),acquisition_angular_speed_);
       jacobian->block(row, 0, 3, decisionDofCount()) = jp;
       jacobian->block(row + 3, 0, 3, decisionDofCount()) = jr;
@@ -4279,6 +4345,13 @@ class PinocchioVelocityIk {
           feasibility_characteristic_length_ * jr,
           feasibility_characteristic_length_ * vr,
           hand_orientation_weight_, hessian, gradient);
+      if (goal.wrist_rotation_only) {
+        for (int joint = 0; joint < 4; ++joint) {
+          const int index = armDecisionIndex(arm, joint);
+          (*hessian)(index, index) +=
+              2.0 * wrist_rotation_only_proximal_weight_;
+        }
+      }
       task_error->at(arm * 3) = ep.norm();
       task_error->at(arm * 3 + 1) = er.norm();
       Matrix6x7d arm_jacobian;
@@ -4289,7 +4362,7 @@ class PinocchioVelocityIk {
           .singularValues().minCoeff();
       translation_sigma->at(arm) = Eigen::JacobiSVD<Matrix3x7d>(
           selectArmColumns(jp, arm)).singularValues().minCoeff();
-      if (goal.elbow_valid) {
+      if (goal.elbow_valid && !goal.wrist_rotation_only) {
         const Eigen::Vector3d ee = goal.elbow_position -
             plant_->GetFrameByName(elbow_frame_names_.at(arm))
                 .CalcPose(*plant_context_, torso).translation();
@@ -4301,7 +4374,8 @@ class PinocchioVelocityIk {
       }
       DecisionJacobian3d bend_jacobian;
       Eigen::Vector3d bend_error;
-      if (incrementalRetractionTask(goal, q, arm, &bend_jacobian, &bend_error)) {
+      if (!goal.wrist_rotation_only &&
+          incrementalRetractionTask(goal, q, arm, &bend_jacobian, &bend_error)) {
         addLeastSquaresCost(bend_jacobian,
             budget_twist(bounded_correction(hand_position_gain_ * bend_error,
                 acquisition_linear_speed_), acquisition_linear_speed_),
@@ -5637,7 +5711,7 @@ class PinocchioVelocityIk {
                 .CalcPose(*plant_context_, frame);
             hand_reference_[arm].reset(held.translation());
             hand_rotation_reference_[arm].reset(Eigen::Quaterniond(held.rotation().matrix()));
-            elbow_reference_[arm].valid = false;
+            elbow_resume_pending_[arm] = true;
             if (target.clutch_hold[arm] || target.arm_hold) {
               a.hand_position = held.translation();
               a.hand_orientation = Eigen::Quaterniond(held.rotation().matrix());
@@ -5646,20 +5720,70 @@ class PinocchioVelocityIk {
           }
           last_shaped_clutch_[arm] = target.clutch_seq[arm];
           last_shaped_pause_[arm] = target.arm_operation_seq;
+          const bool entering_wrist_rotation_only =
+              a.wrist_rotation_only && !last_shaped_wrist_rotation_only_[arm];
+          const bool leaving_wrist_rotation_only =
+              !a.wrist_rotation_only && last_shaped_wrist_rotation_only_[arm];
+          if (entering_wrist_rotation_only) {
+            setPlantDecisionPositions(reference_q_);
+            const auto& frame = world_target.arm_target_torso_relative
+                ? plant_->GetFrameByName(torso_frame_name_) : plant_->world_frame();
+            const auto& link6 = plant_->GetFrameByName(
+                arm == 0 ? "zarm_l6_link" : "zarm_r6_link");
+            link6_reference_[arm].reset(
+                link6.CalcPose(*plant_context_, frame).translation());
+          }
+          if (a.wrist_rotation_only) {
+            velocity_ik::stepFixedVector(link6_reference_[arm],
+                a.link6_position, cycle_dt, hand_position_cutoff_hz_);
+            a.link6_position = link6_reference_[arm].p;
+            a.link6_linear_ff = link6_reference_[arm].v;
+            a.hand_linear_ff.setZero();
+            a.elbow_valid = false;
+            a.elbow_linear_ff.setZero();
+          } else {
+            link6_reference_[arm].valid = false;
+            if (leaving_wrist_rotation_only) {
+              setPlantDecisionPositions(reference_q_);
+              const auto& frame = world_target.arm_target_torso_relative
+                  ? plant_->GetFrameByName(torso_frame_name_) : plant_->world_frame();
+              const auto held = plant_->GetFrameByName(hand_frame_names_[arm])
+                  .CalcPose(*plant_context_, frame);
+              hand_reference_[arm].reset(held.translation());
+              elbow_resume_pending_[arm] = true;
+            }
+          }
+          last_shaped_wrist_rotation_only_[arm] = a.wrist_rotation_only;
           // Match test's default fixed-bandwidth path: shape the immutable
           // observation directly, with no source-age extrapolation.
           velocity_ik::stepFixedVector(hand_reference_[arm],a.hand_position,cycle_dt,hand_position_cutoff_hz_);
           velocity_ik::stepFixedRotation(hand_rotation_reference_[arm],a.hand_orientation,cycle_dt,hand_orientation_cutoff_hz_);
           a.hand_position=hand_reference_[arm].p;
           a.hand_linear_ff=hand_reference_[arm].v;
+          if (a.wrist_rotation_only)
+            a.hand_linear_ff.setZero();
           a.hand_orientation=hand_rotation_reference_[arm].q;
           a.hand_angular_ff=hand_rotation_reference_[arm].v;
           if (a.elbow_valid) {
+            if (elbow_resume_pending_[arm]) {
+              // A same-stamp clutch lifecycle packet may have no elbow hint.
+              // Seed on the first later valid sample, using the current command
+              // FK and the same frame as the target being shaped.
+              setPlantDecisionPositions(reference_q_);
+              const auto& frame = world_target.arm_target_torso_relative
+                  ? plant_->GetFrameByName(torso_frame_name_) : plant_->world_frame();
+              elbow_reference_[arm].reset(
+                  plant_->GetFrameByName(elbow_frame_names_[arm])
+                      .CalcPose(*plant_context_, frame).translation());
+              elbow_resume_pending_[arm] = false;
+            }
             velocity_ik::stepFixedVector(elbow_reference_[arm],a.elbow_position,cycle_dt,hand_position_cutoff_hz_);
             a.elbow_position=elbow_reference_[arm].p;
             a.elbow_linear_ff=elbow_reference_[arm].v;
           } else {
             elbow_reference_[arm].valid=false;
+            if (target.clutch_seq[arm] == 0)
+              elbow_resume_pending_[arm] = false;
             a.elbow_linear_ff.setZero();
           }
         }
@@ -5969,10 +6093,13 @@ class PinocchioVelocityIk {
       }
       if (!retain_owned_reference) {
         for (auto& r:hand_reference_) r.valid=false;
+        for (auto& r:link6_reference_) r.valid=false;
         for (auto& r:elbow_reference_) r.valid=false;
         for (auto& r:hand_rotation_reference_) r.valid=false;
         torso_reference_.valid=false;
       }
+      elbow_resume_pending_.fill(false);
+      last_shaped_wrist_rotation_only_.fill(false);
       reference_initialized_ = retain_owned_reference;
       fallback_active_ = true;
       tracking_ramp_scale_ = 0.0;
@@ -6967,7 +7094,16 @@ class PinocchioVelocityIk {
       const auto& torso=plant_->GetFrameByName(torso_frame_name_);
       for (int arm=0;arm<kArmCount;++arm) if (armIsControlled(arm)) {
         const auto pose=plant_->GetFrameByName(hand_frame_names_[arm]).CalcPose(*plant_context_,torso);
-        aligned &= (world_target.arm[arm].hand_position-pose.translation()).norm()<=acquisition_position_tolerance_ &&
+        const Eigen::Vector3d measured_translation =
+            world_target.arm[arm].wrist_rotation_only
+                ? plant_->GetFrameByName(arm == 0 ? "zarm_l6_link" : "zarm_r6_link")
+                      .CalcPose(*plant_context_,torso).translation()
+                : pose.translation();
+        const Eigen::Vector3d desired_translation =
+            world_target.arm[arm].wrist_rotation_only
+                ? world_target.arm[arm].link6_position
+                : world_target.arm[arm].hand_position;
+        aligned &= (desired_translation-measured_translation).norm()<=acquisition_position_tolerance_ &&
             rotationLog(world_target.arm[arm].hand_orientation.toRotationMatrix()*pose.rotation().matrix().transpose()).norm()<=acquisition_rotation_tolerance_ &&
             candidate.task_error[arm*3]<=acquisition_position_tolerance_ &&
             candidate.task_error[arm*3+1]<=acquisition_rotation_tolerance_;
@@ -7834,8 +7970,15 @@ class PinocchioVelocityIk {
           .CalcPose(*diagnostic_context_, plant_->GetFrameByName(torso_frame_name_));
       message.measured_torso_relative_tcp_pose.at(arm) = toPose(
           measured_pose.translation(), Eigen::Quaterniond(measured_pose.rotation().matrix()));
+      const Eigen::Vector3d measured_translation = target.arm.at(arm).wrist_rotation_only
+          ? plant_->GetFrameByName(arm == 0 ? "zarm_l6_link" : "zarm_r6_link")
+                .CalcPose(*diagnostic_context_, plant_->GetFrameByName(torso_frame_name_))
+                .translation()
+          : measured_pose.translation();
+      const Eigen::Vector3d desired_translation = target.arm.at(arm).wrist_rotation_only
+          ? target.arm.at(arm).link6_position : target.arm.at(arm).hand_position;
       message.measured_task_error.at(3 * arm) =
-          (target.arm.at(arm).hand_position - measured_pose.translation()).norm();
+          (desired_translation - measured_translation).norm();
       message.measured_task_error.at(3 * arm + 1) = rotationLog(
           target.arm.at(arm).hand_orientation.toRotationMatrix() *
           measured_pose.rotation().matrix().transpose()).norm();
@@ -7848,7 +7991,9 @@ class PinocchioVelocityIk {
       message.hand_orientation_weight.at(arm) =
           message.hand_task_active.at(arm) ? hand_orientation_weight_ : 0.0;
       message.cartesian_governor_linear_speed.at(arm) =
-          target.arm.at(arm).hand_linear_ff.norm();
+          (target.arm.at(arm).wrist_rotation_only
+              ? target.arm.at(arm).link6_linear_ff
+              : target.arm.at(arm).hand_linear_ff).norm();
       message.cartesian_governor_angular_speed.at(arm) =
           target.arm.at(arm).hand_angular_ff.norm();
     }
@@ -8324,6 +8469,7 @@ class PinocchioVelocityIk {
   double elbow_position_gain_{5.0};
   double hand_position_weight_{12.0};
   double hand_orientation_weight_{6.0};
+  double wrist_rotation_only_proximal_weight_{0.60};
   double elbow_position_weight_{0.15};
   double posture_weight_{0.010};
   double posture_gain_{0.20};
@@ -8396,7 +8542,10 @@ class PinocchioVelocityIk {
   double hand_position_cutoff_hz_{4.},hand_orientation_cutoff_hz_{3.};
   double torso_reference_frequency_{1.2};
   std::array<uint64_t,kArmCount> last_shaped_clutch_{}, last_shaped_pause_{};
-  std::array<velocity_ik::ContinuousVector,kArmCount> hand_reference_, elbow_reference_;
+  std::array<bool,kArmCount> elbow_resume_pending_{{false,false}};
+  std::array<bool,kArmCount> last_shaped_wrist_rotation_only_{{false,false}};
+  std::array<velocity_ik::ContinuousVector,kArmCount> hand_reference_,
+      link6_reference_, elbow_reference_;
   std::array<velocity_ik::ContinuousRotation,kArmCount> hand_rotation_reference_;
   velocity_ik::ContinuousVector torso_reference_;
   double lower_body_return_start_{0.015};

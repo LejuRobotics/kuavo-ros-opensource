@@ -1,9 +1,14 @@
 """Per-hand clutch in neutral chest axes. Positions in metres, spatial rates in SI."""
+import math
 import numpy as np
 from .pose_velocity_kalman import exp_so3, log_so3, left_jacobian
 
 
 class HandClutch:
+    rotation_only_regrip_distance = .035
+    rotation_only_distance = .03
+    rotation_only_angle = math.radians(10.)
+
     def __init__(self, translation_scale, rotation_scale, incremental_rotation, radius, quiet_distance=.002,
                  observation_window=.1, quiet_angle=.003):
         self.scale = np.asarray(translation_scale, dtype=float)
@@ -21,6 +26,11 @@ class HandClutch:
         self.key = None
         self.edge = None
         self.elbow = None
+        self.elbow_offset = None
+        self.elbow_entry = 0.
+        self.regrip_input = None
+        self.rotation_only_input = None
+        self.held_edge = None
         self.frozen_base = None
         self.frozen_chest = None
         self.command_hold_key = None
@@ -29,6 +39,26 @@ class HandClutch:
         self.source_rotation = None
         from .incremental_controls import RotationTransfer
         self.transfer = RotationTransfer()
+
+    def regrip_input_moved(self, hand, rotation, elbow):
+        old_hand, old_rotation, old_elbow = self.regrip_input
+        return (np.linalg.norm(hand - old_hand) > self.quiet_distance
+                or np.linalg.norm(log_so3(rotation @ old_rotation.T)) > self.angular_quiet_speed * self.window
+                or (elbow is not None and old_elbow is not None
+                    and np.linalg.norm(elbow - old_elbow) > self.quiet_distance))
+
+    def is_rotation_only_regrip(self, hand, rotation):
+        if self.incremental_rotation or self.regrip_input is None:
+            return False
+        old_hand, old_rotation, _ = self.regrip_input
+        return (np.linalg.norm(hand - old_hand) <= self.rotation_only_regrip_distance
+                and np.linalg.norm(log_so3(rotation @ old_rotation.T)) >= self.rotation_only_angle)
+
+    def rotation_only_input_moved(self, hand, elbow):
+        old_hand, old_elbow = self.rotation_only_input
+        return (np.linalg.norm(hand - old_hand) > self.rotation_only_distance
+                or (elbow is not None and old_elbow is not None
+                    and np.linalg.norm(elbow - old_elbow) > self.rotation_only_distance))
 
     def sample(self, key, edge, engaged, hand, rotation, velocity, omega, measured, shoulder, stamp=None):
         if key != self.key:
