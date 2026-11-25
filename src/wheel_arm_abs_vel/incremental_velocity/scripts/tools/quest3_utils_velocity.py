@@ -122,7 +122,8 @@ class Quest3ArmInfoTransformer:
             rospy.get_param("~vr_kalman_position_q", .2),
             rospy.get_param("~vr_kalman_rotation_sigma", .003),
             rospy.get_param("~vr_kalman_rotation_q", 1.8),
-            hand_q_r=rospy.get_param("~vr_kalman_hand_rotation_q", .45))
+            hand_q_r=rospy.get_param("~vr_kalman_hand_rotation_q", .45),
+            chest_sample_hold_seconds=rospy.get_param("~vr_kalman_chest_sample_hold_seconds", 0.))
         self.skeleton_contract = None
         self.estimated_bones = {}
         self.tcp_estimated_rates = {}

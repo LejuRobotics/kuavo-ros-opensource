@@ -202,25 +202,45 @@ class HandTargetCV:
 class SkeletonCV:
     """One observation epoch for the geometry dependency group.
 
-    Equal numerical values at a NEW stamp are still observations. Repeated
-    stamps do not update covariance. No prediction across reset/gap/source.
+    Quest can repeat lower-rate chest rotations in newer arm packets. Predict
+    held chest samples on the packet clock, with a bounded stationary refresh.
+    Repeated stamps do not update covariance. No prediction across reset/gap/source.
     """
     indices = (0, 1, 2, 3, 4, 5, 22, 23)
     rotating = (4, 5, 23)
 
     def __init__(self, sigma_p=.001, q_p=.2, sigma_r=.003, q_r=1.8, max_gap=.1,
-                 hand_q_r=None):
+                 hand_q_r=None, chest_sample_hold_seconds=0.):
         self.parameters = (positive(sigma_p, 'sigma_p'), positive(q_p, 'q_p'),
                            positive(sigma_r, 'sigma_r'), positive(q_r, 'q_r'))
         # None preserves the legacy API; the ROS mapper explicitly selects
         # the palm noise. Chest and both palms share the same timestamp.
         self.hand_q_r = None if hand_q_r is None else positive(hand_q_r, 'hand_q_r')
         self.max_gap = positive(max_gap, 'max_gap')
+        self.chest_sample_hold_seconds = float(chest_sample_hold_seconds)
+        if not 0. <= self.chest_sample_hold_seconds <= self.max_gap:
+            raise ValueError('chest sample hold must be between zero and max_gap')
         self.reset()
 
     def reset(self):
         self.stamp = None; self.key = None; self.states = {}
         self.positions = {}; self.rotations = {}; self.updates = 0
+        self.chest_rotation_stamp = None
+        self.chest_rotation_measurement = None
+
+    def _update_chest_rotation(self, observer, rotation, stamp):
+        previous_stamp = self.chest_rotation_stamp
+        if previous_stamp is not None:
+            age = stamp - previous_stamp
+            if (age < self.chest_sample_hold_seconds and
+                    np.max(np.abs(rotation - self.chest_rotation_measurement)) <= 1.e-12):
+                # Keep the measurement state and its covariance on the chest
+                # clock. Emit the predicted rotation at this arm packet's stamp.
+                return exp_so3(observer.w * age) @ observer.R, observer.w.copy()
+        self.chest_rotation_stamp = stamp
+        self.chest_rotation_measurement = rotation.copy()
+        dt = None if previous_stamp is None else stamp - previous_stamp
+        return observer.update(rotation, dt)
 
     def update(self, transforms, stamp, key):
         if not math.isfinite(stamp): raise ValueError('invalid source stamp')
@@ -240,7 +260,11 @@ class SkeletonCV:
             if i in self.rotating:
                 rotation_q = self.hand_q_r if i in (4, 5) and self.hand_q_r is not None else qr
                 if i not in self.rotations: self.rotations[i] = RotationCV(sr, rotation_q, velocity_gain=1.0)
-                R, w = self.rotations[i].update(R, dt)
+                observer = self.rotations[i]
+                if i == 23 and self.chest_sample_hold_seconds > 0.:
+                    R, w = self._update_chest_rotation(observer, R, stamp)
+                else:
+                    R, w = observer.update(R, dt)
             T = np.eye(4); T[:3, :3] = R; T[:3, 3] = p
             self.states[i] = (T, v, w)
         self.stamp = stamp; self.key = key; self.updates += 1
