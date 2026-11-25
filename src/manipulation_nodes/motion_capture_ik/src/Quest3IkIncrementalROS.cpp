@@ -4409,6 +4409,15 @@ HighlyDynamic::SG100VrInput Quest3IkIncrementalROS::makeSg100VrInput() {
   in.left_first_pressed = [this] {
     return joyStickHandlerPtr_ && joyStickHandlerPtr_->isLeftFirstButtonPressed();
   };
+  in.left_second_touched = [this] {
+    return joyStickHandlerPtr_ && joyStickHandlerPtr_->isLeftSecondButtonTouched();
+  };
+  in.left_second_pressed = [this] {
+    return joyStickHandlerPtr_ && joyStickHandlerPtr_->isLeftSecondButtonPressed();
+  };
+  in.sticks_neutral = [this] {
+    return joyStickHandlerPtr_ && joyStickHandlerPtr_->isSg100GestureStickNeutral();
+  };
   in.right_first_touched = [this] {
     return joyStickHandlerPtr_ && joyStickHandlerPtr_->isRightFirstButtonTouched();
   };

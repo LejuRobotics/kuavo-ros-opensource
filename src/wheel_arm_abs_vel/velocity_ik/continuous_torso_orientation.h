@@ -1,5 +1,7 @@
 #pragma once
 
+#include "torso_heading.h"
+
 #include <Eigen/Core>
 #include <algorithm>
 #include <cmath>
@@ -49,21 +51,20 @@ struct ContinuousTorsoOrientation {
     const double second_cost = valid ? (second - previous).squaredNorm()
                                      : second.x() * second.x();
     rpy = first_cost <= second_cost ? first : second;
+    // ZYX yaw copies the singular roll once the chest faces the floor
+    // (yaw ≈ roll). Use the forward/left heading instead; it keeps the
+    // compass direction while pitch above still follows this ZYX branch.
+    const double anatomical_yaw = torsoHeading(rotation).yaw;
+    rpy.z() = valid ? nearest(anatomical_yaw, previous.z())
+                    : nearest(anatomical_yaw, 0.0);
 
     if (horizontal < 0.10) {
-      // The forward axis cannot determine heading near vertical. Continue
-      // roll smoothly and recover yaw from the well-conditioned lateral axis:
-      // R01+i*R11 = exp(i*yaw)*(sin(pitch)*sin(roll)+i*cos(roll)).
-      // Fade to the exact ZYX solution by |cos(pitch)|=0.10 (~5.7 deg
-      // from vertical); below 0.01 yaw/roll are inseparable, so continue the
-      // preceding roll convention. This changes no following/hold authority.
+      // Below |cos(pitch)|≈0.10, yaw and roll are the same axis. Hold the
+      // preceding roll instead of following that split.
       const double t = std::clamp((horizontal - 0.01) / 0.09, 0.0, 1.0);
       const double weight = t * t * (3.0 - 2.0 * t);
       const double reference_roll = valid ? previous.x() : 0.0;
       rpy.x() = reference_roll + weight * (rpy.x() - reference_roll);
-      const double yaw = std::atan2(rotation(1, 1), rotation(0, 1)) -
-          std::atan2(std::cos(rpy.x()), std::sin(rpy.y()) * std::sin(rpy.x()));
-      rpy.z() = nearest(yaw, valid ? previous.z() : 0.0);
     }
 
     // Differentiate the same coordinates as the absolute position target.

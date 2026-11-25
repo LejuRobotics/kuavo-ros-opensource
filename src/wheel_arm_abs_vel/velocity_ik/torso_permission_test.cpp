@@ -212,8 +212,12 @@ struct VelocityIkOfflineTest {
         observe(roll,pitch,179.*deg);
         const auto intent=n.calculateBodyIntent(n.target_);
         require(intent.torso_valid,"continuous torso intent became invalid");
-        require(std::abs(intent.desired_torso_feature(3)-robot_anchor(3))<1e-8,
-                "pure bow commanded waist yaw");
+        const double yaw_command=intent.desired_torso_feature(3)-robot_anchor(3);
+        if(std::abs(roll)<1e-12)
+          require(std::abs(yaw_command)<1e-8,"pure bow commanded waist yaw");
+        else
+          require(std::abs(yaw_command)<n.torso_yaw_gain_*(std::abs(roll)+5.*deg),
+                  "pure bow yaw followed the singular roll split");
         require(std::abs(intent.desired_torso_feature(2)-robot_anchor(2)-n.torso_pitch_gain_*pitch)<1e-8,
                 "pitch folded back across 90 degrees");
         require(intent.desired_torso_velocity.allFinite(),"singular torso feedforward");
@@ -226,7 +230,14 @@ struct VelocityIkOfflineTest {
       for(int i=0;i<=1100;++i)observe(roll,i*.1*deg,179.*deg);
       for(int i=1;i<=600;++i)observe(roll,110.*deg,(179.+i*.1)*deg);
       const auto turned=n.calculateBodyIntent(n.target_);
-      require(std::abs(turned.desired_torso_feature(3)-robot_anchor(3)-n.torso_yaw_gain_*60.*deg)<1e-8,
+      const Eigen::Matrix3d turned_rotation=
+          (Eigen::AngleAxisd((179.+60.)*deg,Eigen::Vector3d::UnitZ())*
+           Eigen::AngleAxisd(110.*deg,Eigen::Vector3d::UnitY())*
+           Eigen::AngleAxisd(roll,Eigen::Vector3d::UnitX())).toRotationMatrix();
+      const double turned_yaw=velocity_ik::ContinuousTorsoOrientation::nearest(
+          velocity_ik::torsoHeading(turned_rotation).yaw, human_anchor.z());
+      require(std::abs(turned.desired_torso_feature(3)-robot_anchor(3)-
+                       n.torso_yaw_gain_*(turned_yaw-human_anchor.z()))<1e-6,
               "turning while bent or crossing yaw wrap lost its absolute gain");
       const auto before=n.target_.body.torso_orientation;
       m->arm_hold=true;++m->arm_operation_seq;

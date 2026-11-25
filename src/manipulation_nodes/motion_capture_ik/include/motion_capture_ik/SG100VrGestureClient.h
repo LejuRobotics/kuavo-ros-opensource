@@ -15,6 +15,9 @@ struct SG100VrInput {
   std::function<float()> right_trigger;
   std::function<bool()> left_first_touched;
   std::function<bool()> left_first_pressed;
+  std::function<bool()> left_second_touched;
+  std::function<bool()> left_second_pressed;
+  std::function<bool()> sticks_neutral;
   std::function<bool()> right_first_touched;
   std::function<bool()> right_first_pressed;
   std::function<bool()> right_second_touched;
@@ -26,7 +29,9 @@ struct SG100VrInput {
  *
  * 不持有手势库,也不注册 /sg100/ 服务。仅在原始输入新鲜时 30Hz 发布 /sg100/trigger,
  * 断流时发送一次空 data 通知暂停,不会重复发送缓存的扳机值。
- * 摸 X+A / X+B 满 300ms 后调用 /sg100/vr_step_gesture。
+ * 仅轻触 Y+A / Y+B 满 800ms 后调用 /sg100/vr_step_gesture。
+ * 四个摇杆轴必须回中（原始值绝对值 <= 0.1）；按压、触摸 X、A/B 同触或摇杆偏转取消。
+ * 切换或取消后必须完全松开 X/Y/A/B 再试。
  * 服务由真机或仿真的手节点提供。
  */
 class SG100VrGestureClient {
@@ -42,7 +47,7 @@ class SG100VrGestureClient {
   void loop();
   void checkVrGestureSwitch();
 
-  static constexpr double kConfirmDelaySec = 0.3;
+  static constexpr double kConfirmDelaySec = 0.8;
 
   ros::NodeHandle nh_;
   SG100VrInput vr_;

@@ -734,24 +734,23 @@ class IkRos:
         print(f"\033[93m- End effector type: {self.end_effector_type} \033[0m")
         print(f"\033[93m--------------------------------------------------\033[0m")
 
-        # 轮臂绝对式：黑漫手势库在手节点上，这里只转发扳机并调用切手势。
+        # 老 Python IK（人形与轮臂）：黑漫手势库在手节点上，只转发扳机并调用切手势。
         self._sg100_abs_vr = False
         self._sg100_trigger_pub = None
         self._sg100_step = None
         self._sg100_pending_dir = 0
         self._sg100_pending_start = 0.0
         self._sg100_debounce = False
-        self._sg100_confirm_sec = 0.3
+        self._sg100_confirm_sec = 0.8
         self._sg100_step_warn_time = 0.0
         self._sg100_frozen_trigger = (0.0, 0.0)
-        wheel_absolute = self.robot_type == 1 or bool(rospy.get_param("/wheel_ik", False))
-        if self.end_effector_type == HEIMAN and wheel_absolute:
+        if self.end_effector_type == HEIMAN:
             try:
                 from kuavo_msgs.srv import SG100StepGesture
             except ImportError as exc:
                 rospy.logerr(
                     "[IkRos] SG100StepGesture unavailable (%s); "
-                    "wheel absolute heiman VR hand control disabled",
+                    "heiman VR hand control disabled",
                     exc,
                 )
             else:
@@ -763,8 +762,8 @@ class IkRos:
                     "/sg100/vr_step_gesture", SG100StepGesture
                 )
                 rospy.loginfo(
-                    "[IkRos] wheel absolute heiman: publishing /sg100/trigger, "
-                    "stepping via /sg100/vr_step_gesture (X+A next, X+B prev, hold 300ms)"
+                    "[IkRos] legacy Python heiman: publishing /sg100/trigger, "
+                    "stepping via /sg100/vr_step_gesture (touch Y+A next, Y+B prev, hold 800ms, sticks neutral)"
                 )
 
         # All callback-visible state must be initialized before subscriptions
@@ -2967,7 +2966,7 @@ class IkRos:
 
 
     def _publish_sg100_from_joystick(self, joy):
-        """轮臂绝对式黑漫：扳机 0~1 发到 /sg100/trigger，摸 X+A / X+B 满 300ms 切手势。
+        """人形／轮臂老 Python IK 黑漫：扳机 0~1 发到 /sg100/trigger，仅轻触 Y+A / Y+B 满 800ms（摇杆回中）切手势。
 
         按下左手 Y 锁定当前姿势：扳机和切手势都不再响应，再按一次解除。
         锁定期间仍发布按下瞬间的扳机值，避免断流后手势桥松手。
@@ -2978,7 +2977,7 @@ class IkRos:
         if y_pressed and not self.__button_y_last:
             self.__freeze_finger = not self.__freeze_finger
             self._sg100_pending_dir = 0
-            self._sg100_debounce = False
+            self._sg100_debounce = True
             if self.__freeze_finger:
                 self._sg100_frozen_trigger = (
                     max(0.0, min(1.0, float(joy.left_trigger))),
@@ -3002,28 +3001,29 @@ class IkRos:
             self._check_sg100_gesture_switch(joy)
 
     def _check_sg100_gesture_switch(self, joy):
-        now = time.time()
-        if not joy.left_first_button_touched:
+        now = time.monotonic()
+        x = bool(joy.left_first_button_touched)
+        y = bool(joy.left_second_button_touched)
+        a = bool(joy.right_first_button_touched)
+        b = bool(joy.right_second_button_touched)
+        pressed = any((joy.left_first_button_pressed, joy.left_second_button_pressed,
+                       joy.right_first_button_pressed, joy.right_second_button_pressed))
+        sticks = (joy.left_x, joy.left_y, joy.right_x, joy.right_y)
+        neutral = all(math.isfinite(v) and abs(v) <= .1 for v in sticks)
+        if not any((x, y, a, b, pressed)):
             self._sg100_pending_dir = 0
             self._sg100_debounce = False
             return
-
-        if joy.right_first_button_touched:
-            direction = 1
-            btn_pressed = bool(joy.right_first_button_pressed)
-        elif joy.right_second_button_touched:
-            direction = -1
-            btn_pressed = bool(joy.right_second_button_pressed)
-        else:
+        if x or pressed or (a and b) or not neutral:
             self._sg100_pending_dir = 0
-            self._sg100_debounce = False
-            return
-
-        if joy.left_first_button_pressed and btn_pressed:
-            self._sg100_pending_dir = 0
+            self._sg100_debounce = True
             return
         if self._sg100_debounce:
             return
+        if not y or a == b:
+            self._sg100_pending_dir = 0
+            return
+        direction = 1 if a else -1
         if self._sg100_pending_dir != direction:
             self._sg100_pending_dir = direction
             self._sg100_pending_start = now

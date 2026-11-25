@@ -57,6 +57,8 @@ class WheelJoyStickHandler {
   bool isRightFirstButtonPressed() const;
   bool isLeftSecondButtonPressed() const;
   bool isRightSecondButtonPressed() const;
+  bool isSg100GestureStickNeutral() const;
+  bool isLeftSecondButtonTouched() const;  // 左手 Y 键触摸
   bool isLeftFirstButtonTouched() const;   // 左手 X 键触摸
   bool isRightFirstButtonTouched() const;  // 右手 A 键触摸
   bool isRightSecondButtonTouched() const; // 右手 B 键触摸
@@ -93,6 +95,8 @@ class WheelJoyStickHandler {
   // 按钮状态
   bool leftSecondButtonPressed_;
   bool leftFirstButtonTouched_;
+  bool leftSecondButtonTouched_;
+  bool sg100GestureStickNeutral_ = false;
   bool leftFirstButtonPressed_;  // 左手第一个按键按下状态
   bool rightSecondButtonPressed_;
   bool rightSecondButtonTouched_;   // 右手 B 键触摸状态

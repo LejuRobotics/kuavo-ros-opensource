@@ -43,6 +43,7 @@ void JoyStickHandler::initialize() {
   leftSecondButtonPressed_ = false;
   leftSecondButtonTouched_ = false;
   leftFirstButtonTouched_ = false;
+  sg100GestureStickNeutral_ = false;
   leftFirstButtonPressed_ = false;
   rightSecondButtonPressed_ = false;
   rightFirstButtonTouched_ = false;
@@ -104,6 +105,7 @@ void JoyStickHandler::reset() {
   leftSecondButtonPressed_ = false;
   leftSecondButtonTouched_ = false;
   leftFirstButtonTouched_ = false;
+  sg100GestureStickNeutral_ = false;
   leftFirstButtonPressed_ = false;
   rightSecondButtonPressed_ = false;
   rightFirstButtonTouched_ = false;
@@ -280,6 +282,11 @@ void JoyStickHandler::updateJoyStickData(const noitom_hi5_hand_udp_python::JoySt
   // 更新按钮状态
   leftSecondButtonPressed_ = msg->left_second_button_pressed;
   leftSecondButtonTouched_ = msg->left_second_button_touched;
+  // Use raw axes, not filtered movement commands, for gesture safety.
+  sg100GestureStickNeutral_ = std::isfinite(msg->left_x) && std::isfinite(msg->left_y) &&
+      std::isfinite(msg->right_x) && std::isfinite(msg->right_y) &&
+      std::abs(msg->left_x) <= 0.1 && std::abs(msg->left_y) <= 0.1 &&
+      std::abs(msg->right_x) <= 0.1 && std::abs(msg->right_y) <= 0.1;
   leftFirstButtonTouched_ = msg->left_first_button_touched;
   leftFirstButtonPressed_ = msg->left_first_button_pressed;
   rightSecondButtonPressed_ = msg->right_second_button_pressed;
@@ -651,6 +658,11 @@ bool JoyStickHandler::isLeftSecondButtonPressed() const {
 bool JoyStickHandler::isRightSecondButtonPressed() const {
   std::lock_guard<std::mutex> lock(dataMutex_);
   return rightSecondButtonPressed_;
+}
+
+bool JoyStickHandler::isSg100GestureStickNeutral() const {
+  std::lock_guard<std::mutex> lock(dataMutex_);
+  return sg100GestureStickNeutral_;
 }
 
 bool JoyStickHandler::isLeftFirstButtonTouched() const {
