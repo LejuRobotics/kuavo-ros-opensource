@@ -241,20 +241,34 @@ class RotationTransfer:
     """Continuous release of an entry/frame-change offset, not another hand filter.
 
     Away from a handoff the goal and observer velocity pass through exactly.
-    The offset uses the shared IK orientation bandwidth and decays to identity:
-    absolute orientation stays absolute, including after a full wrist turn.
+    The offset decays to identity. Large offsets use a slower decay so the
+    absolute pose at regrip cannot demand a fast round of catch-up.
     A branch-cut change of the bounded candidate uses the same transfer, without
     waiting for confirmations, changing clutch state or discarding human input.
     """
-    def __init__(self, frequency=4.):
+    def __init__(self, frequency=4., max_offset_speed=6.0):
         self.frequency = float(frequency)
         if not math.isfinite(self.frequency) or self.frequency <= 0:
             raise ValueError('invalid orientation reference frequency')
+        self.max_offset_speed = float(max_offset_speed)
+        if not math.isfinite(self.max_offset_speed) or self.max_offset_speed <= 0:
+            raise ValueError('invalid regrip orientation speed')
         self.output = self.previous_goal = None
         self.offset = np.zeros(3)
+        self.offset_duration = 0.
         self.start = 0.
         self.pending = False
         self.previous_source = self.previous_branch = None
+
+    def _capture_offset(self, held, goal, stamp):
+        self.offset = log_so3(held @ goal.T)
+        self.start = stamp
+        angle = np.linalg.norm(self.offset)
+        natural_rate = 2. * math.pi * self.frequency
+        # Keep the nominal blend for small offsets. A quintic has zero
+        # endpoint velocity/acceleration and peak speed 1.875 * angle / T.
+        self.offset_duration = (1.875 * angle / self.max_offset_speed
+                                if angle * natural_rate / math.e > self.max_offset_speed else 0.)
 
     def engage(self, held, stamp, goal=None, source=None, branch=None):
         self.output = held.copy()
@@ -264,13 +278,13 @@ class RotationTransfer:
         self.start = stamp
         self.pending = goal is None
         if goal is not None:
-            self.offset = log_so3(held @ goal.T)
+            self._capture_offset(held, goal, stamp)
 
     def step(self, goal, omega, stamp, source=None, branch=None):
         if self.output is None:
             self.output = goal.copy()
         if self.pending:
-            self.offset = log_so3(self.output @ goal.T)
+            self._capture_offset(self.output, goal, self.start)
             self.pending = False
         elif (branch is not None and self.previous_branch is not None and
               branch != self.previous_branch):
@@ -278,15 +292,17 @@ class RotationTransfer:
             # release only the admission discontinuity. No motion threshold,
             # input gate, or additional HOLD state is introduced.
             expected = source @ self.previous_source.T @ self.output
-            self.offset = log_so3(expected @ goal.T)
-            self.start = stamp
+            self._capture_offset(expected, goal, stamp)
         self.previous_source = None if source is None else source.copy()
         self.previous_branch = branch
         self.previous_goal = goal.copy()
         t = max(0., stamp-self.start)
-        rate = 2.*math.pi*self.frequency
-        e = math.exp(-rate*t)
-        blend = (1.+rate*t)*e
+        if self.offset_duration > 0.:
+            u = min(1., t / self.offset_duration)
+            blend = 1. - u**3 * (10. - 15.*u + 6.*u*u)
+        else:
+            u = 2. * math.pi * self.frequency * t
+            blend = (1. + u) * math.exp(-u)
         correction = exp_so3(blend*self.offset)
         self.output = correction @ goal
         # Feedforward remains the hand observer's state, including exact zero

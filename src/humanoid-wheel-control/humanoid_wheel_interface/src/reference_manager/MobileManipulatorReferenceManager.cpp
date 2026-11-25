@@ -714,6 +714,13 @@ namespace mobile_manipulator {
 
   void MobileManipulatorReferenceManager::setupSubscriptions(std::string nodeHandleName)
   {
+    // 部署版 WBC 的 VR 控制使用 BaseArm。先设置启动模式，再对外提供模式服务。
+    if (nodeHandle_.param<int>("/wheel_control_type", 0) != 0 &&
+        nodeHandle_.param<bool>("/use_external_mpc", false) &&
+        nodeHandle_.param<bool>("/use_vr_control", false)) {
+      currentMpcControlMode_ = MpcControlMode::BaseArm;
+    }
+
     torsoResetWindowActivePub_ = nodeHandle_.advertise<std_msgs::Bool>(
         "/mobile_manipulator_torso_reset_window_active", 1, true);
     std_msgs::Bool resetWindowMsg;

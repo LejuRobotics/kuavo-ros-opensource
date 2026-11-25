@@ -707,24 +707,6 @@ namespace humanoidController_wheel_wbc
     arm_force_estimator_ = std::make_unique<ArmContactForceEstimatorWheel>(
         pinocchioInterface_ptr_, manipulatorModelInfo_, lowJointNum_, ros_logger_);
     
-    // 初始化MPC模式切换服务客户端并设置为ArmOnly模式（仅在启用外部MPC且VR模式时）
-    if(enable_mpc_ && use_vr_control_)
-    {
-      mpc_control_client_ = controllerNh_.serviceClient<kuavo_msgs::changeTorsoCtrlMode>("/mobile_manipulator_mpc_control");
-      
-      // 初始化时设置为BaseArm模式模式，用于VR躯干控制
-      kuavo_msgs::changeTorsoCtrlMode srv;
-      srv.request.control_mode = 3;
-      if(mpc_control_client_.call(srv) && srv.response.result)
-      {
-        ROS_INFO("[humanoidController_wheel_wbc] MPC mode initialized to ArmOnly for VR torso control");
-      }
-      else
-      {
-        ROS_WARN("[humanoidController_wheel_wbc] Failed to initialize MPC mode to ArmOnly");
-      }
-    }
-    
     // 初始化重置cmdVel Ruckig规划器服务客户端
     reset_cmd_vel_ruckig_client_ = controllerNh_.serviceClient<std_srvs::SetBool>("/mobile_manipulator_reset_cmd_vel_ruckig");
     reset_cmd_vel_ruckig_srv_.request.data = true;  // 重新规划

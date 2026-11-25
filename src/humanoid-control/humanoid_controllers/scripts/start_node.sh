@@ -1,11 +1,10 @@
 #!/bin/bash
 # @stdoutlog
 # FIX: 避免跨秒生成多个日志目录
-# 原理：使用 PPID 进程（roslaunch）的启动时间作为日志目录名。
-#       同一次 roslaunch 启动的所有节点共享同一个 PPID，其启动时间是固定不变的，
-#       因此每个节点独立计算得到的目录名一致，配合 mkdir -p 天然复用同一目录，
-#       不依赖锁文件，避免锁文件残留、跨秒竞态等隐患。
-# 兼容原有时间戳目录格式，不影响 CrashReport.sh 等现有工具。
+# 同一次 roslaunch 的节点共享 PPID。目录名由第一个节点写入，其余节点读取同一份。
+# 键使用 /proc/<ppid>/stat 的 starttime（开机后的时钟滴答），不解析 ps -o lstart 文本，
+# 避免 date -d 失败后各自退回墙钟、启动跨秒时拆成两个目录。
+# 时间戳目录格式保持 YYYY-MM-DD_HH-MM-SS，不影响 CrashReport.sh。
 CORE_DUMP_DIR="$HOME/.ros/coredumps/$PPID"
 START_ARG_IDX=1
 
@@ -30,16 +29,59 @@ fi
 STDROOT_DIR="$HOME/.ros/stdout"
 mkdir -p "${STDROOT_DIR}"
 
-# 使用 PPID 进程的启动时间作为日志目录名，保证同一次启动的所有节点目录一致
-# ps -o lstart= 输出形如 "Mon Jun 15 17:07:34 2026"，date -d 解析后格式化为标准时间戳
-PPID_LSTART=$(ps -o lstart= -p "${PPID}" 2>/dev/null)
-if [ -n "${PPID_LSTART}" ]; then
-    TIMESTAMP=$(date -d "${PPID_LSTART}" +%Y-%m-%d_%H-%M-%S 2>/dev/null)
+# /proc/pid/stat 在最后一个 ')' 之后，第 20 个字段是 starttime（时钟滴答）。
+# comm 可能含空格和括号，所以先丢掉 "pid (comm)"。
+ppid_start_ticks() {
+    local stat_file="$1"
+    [ -r "${stat_file}" ] || return 1
+    sed 's/.*) //' "${stat_file}" 2>/dev/null | awk '{print $20}'
+}
+
+START_TICKS=$(ppid_start_ticks "/proc/${PPID}/stat")
+case "${START_TICKS}" in
+    ''|*[!0-9]*) START_TICKS="" ;;
+esac
+
+# 戳放在 stdout 外面，避免被当成一次运行的日志目录。
+STAMP_ROOT="${HOME}/.ros/stdout_launch_stamp"
+TIMESTAMP=""
+if [ -n "${START_TICKS}" ]; then
+    STAMP_DIR="${STAMP_ROOT}/${PPID}_${START_TICKS}"
+    mkdir -p "${STAMP_ROOT}"
+    if mkdir "${STAMP_DIR}" 2>/dev/null; then
+        date +%Y-%m-%d_%H-%M-%S > "${STAMP_DIR}/stamp"
+    else
+        # 同一次启动里别的节点已经抢到目录，等它把时间戳写完。
+        for _ in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30 31 32 33 34 35 36 37 38 39 40; do
+            [ -s "${STAMP_DIR}/stamp" ] && break
+            sleep 0.05
+        done
+    fi
+    if [ -s "${STAMP_DIR}/stamp" ]; then
+        TIMESTAMP=$(cat "${STAMP_DIR}/stamp")
+    fi
+
+    # 清掉已经退出的父进程留下的戳，避免 PID 复用后读到旧时间。
+    for old_dir in "${STAMP_ROOT}"/*; do
+        [ -d "${old_dir}" ] || continue
+        old_name=$(basename "${old_dir}")
+        [ "${old_name}" = "${PPID}_${START_TICKS}" ] && continue
+        old_pid=${old_name%%_*}
+        old_ticks=${old_name#*_}
+        if [ ! -d "/proc/${old_pid}" ]; then
+            rm -rf "${old_dir}"
+            continue
+        fi
+        live_ticks=$(ppid_start_ticks "/proc/${old_pid}/stat")
+        if [ "${live_ticks}" != "${old_ticks}" ]; then
+            rm -rf "${old_dir}"
+        fi
+    done
 fi
-# 兜底：若获取 PPID 启动时间失败，则退化为当前时间（理论上不会触发）
-# 打印告警信息便于事后排查（输出到 stderr，避免污染节点 stdout）
+
+# 读不到父进程启动滴答，或共享戳没写出来时，才退回当前时间。
 if [ -z "${TIMESTAMP}" ]; then
-    echo "[start_node.sh][WARN] 获取 PPID(${PPID}) 启动时间失败，PPID_LSTART='${PPID_LSTART}'，回退使用当前时间作为日志目录名。NODE_NAME=${NODE_NAME}" >&2
+    echo "[start_node.sh][WARN] 共享日志目录时间戳失败，PPID=${PPID} START_TICKS='${START_TICKS}'，回退使用当前时间。NODE_NAME=${NODE_NAME}" >&2
     TIMESTAMP=$(date +%Y-%m-%d_%H-%M-%S)
 fi
 

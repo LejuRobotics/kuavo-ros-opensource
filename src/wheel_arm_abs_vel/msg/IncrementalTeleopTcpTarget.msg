@@ -105,3 +105,8 @@ bool knee_leg_hold
 # In dual Quest a disconnected side can supply only a latched robot HOLD,
 # never a live human observation or motion permission. Owner loss locks torso.
 bool[2] robot_hold_target
+
+# During a rotation-only regrip, hold link6 at this point and use the normal
+# TCP orientation. The point uses the same axes and origin as the TCP pose.
+bool[2] wrist_rotation_only
+geometry_msgs/Point[2] link6_position
