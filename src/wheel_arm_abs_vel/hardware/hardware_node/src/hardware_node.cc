@@ -4,11 +4,13 @@
 #include <kuavo_common/common/BackgroundThread.h>
 #include "hardware_node.h"
 #include "hardware_node/ActuatorDynamics.hpp"
+#include "hardware_node/sg100_startup_grip.h"
 #include "kuavo_assets/include/package_path.h"
 #include "motorevo/motorevo_actuator.h"
 
 #include <set>
 #include <algorithm>
+#include <atomic>
 #include <chrono>
 #include <functional>
 #include <limits>
@@ -234,6 +236,18 @@ namespace HighlyDynamic
             usleep(100000);
         }
 
+        if (shutdownRequested() || !ros::ok()) return;
+        // Both whole-body IK modes share this hardware startup path. Complete
+        // the hand check before accepting the normal startup confirmation.
+        if (hardware_plant_->end_effector_type_ == "heiman") {
+            static std::atomic<bool> startup_grip_started{false};
+            if (!startup_grip_started.exchange(true) &&
+                !sg100::runStartupGrip(nh_, [this] { return shutdownRequested(); })) {
+                if (shutdownRequested() || !ros::ok()) return;
+                ROS_WARN("SG100 startup grip did not complete; hand control released. "
+                         "Continuing to the normal robot startup confirmation.");
+            }
+        }
         if (shutdownRequested() || !ros::ok()) return;
         auto real_initial_start_service_ = nh_.advertiseService("/humanoid_controller/real_initial_start", &HardwareNode::realIntialStartCallback, this);
         
