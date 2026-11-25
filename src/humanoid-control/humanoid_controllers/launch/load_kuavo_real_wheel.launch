@@ -60,7 +60,7 @@
     <arg name="sg100_kp" default="10.0"/>
     <arg name="sg100_ki" default="0.0"/>
     <arg name="sg100_kd" default="0.02"/>
-    <arg name="sg100_output_limit" default="0.5"/>
+    <arg name="sg100_output_limit" default="0.08"/>
     <!-- 根据机器人类型设置only_half_up_body参数 -->
     <arg name="only_half_up_body" default="false" if="$(eval arg('robot_type') == 1)"/>    <!-- 轮臂机器人 -->
     <arg name="only_half_up_body" default="false" unless="$(eval arg('robot_type') == 1)"/> <!-- 双足机器人 -->
@@ -134,8 +134,8 @@
     <param name="ruiwo_cxx_sdk" value="$(arg ruiwo_cxx_sdk)"/>
 
     <!-- SG100 hand params -->
-    <param name="sg100_left_port" value="/dev/lefthand" />
-    <param name="sg100_right_port" value="/dev/righthand" />
+    <param name="sg100_left_port" value="/dev/LJ485A" />
+    <param name="sg100_right_port" value="/dev/LJ485B" />
     <param name="sg100_baudrate" value="1000000" />
     <param name="sg100_control_rate" value="100.0" />
     <param name="sg100_publish_joint_states" value="true" />

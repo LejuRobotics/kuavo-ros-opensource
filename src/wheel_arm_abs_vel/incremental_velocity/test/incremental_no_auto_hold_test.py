@@ -3,9 +3,11 @@
 import ast
 import copy
 import math
+from enum import IntEnum
 from pathlib import Path
 import subprocess
 import tempfile
+import threading
 from types import SimpleNamespace as NS
 import unittest
 import xml.etree.ElementTree as ET
@@ -88,6 +90,83 @@ class DualInputTest(unittest.TestCase):
         third=d.skeleton(1,bones(1040),20.041)
         self.assertGreater(third.skeleton.timestamp_ms,second.skeleton.timestamp_ms)
         self.assertEqual(third.side_available,[True,True])
+
+
+class StartupTest(unittest.TestCase):
+    def setUp(self):
+        path = ROOT / 'scripts/ik_ros_velocity.py'
+        tree = ast.parse(path.read_text(), filename=str(path))
+        states = ('AbsoluteEnableState', 'AbsoluteEnableReason')
+        definitions = [node for node in tree.body if getattr(node, 'name', None) in states]
+        mapper = next(node for node in tree.body if getattr(node, 'name', None) == 'IkRos')
+        methods = ('_advance_fixed_request', '_queue_fixed_request_locked', 'fixed_arm_operation_callback',
+                   '_fixed_operation_mode', '_fixed_arm_operation', '_set_incremental_entry_pose',
+                   '_fixed_capture_input_error_locked', '_follow_input_time_locked')
+        definitions.extend(node for node in mapper.body if getattr(node, 'name', None) in methods)
+        self.now = 10.
+        self.params = {}
+        scope = dict(IntEnum=IntEnum, time=NS(monotonic=lambda: self.now),
+                     rospy=NS(set_param=self.params.__setitem__),
+                     TeleopTcpTarget=NS(SOURCE_QUEST_HAND_TRACKING=2),
+                     changeArmCtrlModeResponse=lambda ok, mode, message: NS(result=ok, mode=mode))
+        exec(compile(ast.Module(body=definitions, type_ignores=[]), str(path), 'exec'), scope)
+        self.state = scope['AbsoluteEnableState']
+        self.mapper = NS(
+            enable_absolute_target_alignment=True, enable_velocity_ik_takeover=True,
+            _clutches=[object(), object()], _reset_to_default=True,
+            _absolute_lock=threading.RLock(), _fixed_operation_mutex=threading.Lock(),
+            _absolute_state=self.state.WAITING,
+            _absolute_session_id=0, _absolute_generation=0, _body_coordinate_epoch=0,
+            _fixed_stop_epoch=0, _fixed_control_enabled=True, _fixed_pending_operation=None,
+            _fixed_operation_error=False, _fixed_operation_block=False,
+            _fixed_prepare_bootstrap=False, _fixed_dependency_timeout=12.,
+            _fixed_acquisition_timeout=5., _absolute_mode_status=(0, 0, False),
+            _absolute_fault_hold_pending=False, _tracking_source_hold_latched=False,
+            _absolute_stop_pending=False, _absolute_external_mode_reset_pending=False,
+            _absolute_latest_measured_q=np.tile([.26, 0., 0., -.5, 0., 0., 0.], 2),
+            _tracking_last_accepted_source=1,
+            absolute_enable_max_vr_age=.25, absolute_enable_max_joint_state_age=.1,
+            quest3_arm_info_transformer=NS(is_stop_gesture=lambda: False),
+            _configured_tracking_source=lambda: 1, _wheel_mpc_stable_for_mm_cmd=lambda: True,
+            _publish_fixed_operation_state=lambda: None, _authorize_fixed_follow_locked=lambda: None,
+            _start_velocity_session_locked=self.start_session)
+        for name in methods:
+            setattr(self.mapper, name, scope[name].__get__(self.mapper))
+        self.fresh_feedback()
+
+    def fresh_feedback(self):
+        self.mapper._last_valid_tcp_receive = self.now
+        self.mapper._joystick_receive_monotonic = self.now
+        self.mapper._absolute_latest_measured_q_time = self.now
+
+    def start_session(self, reason):
+        self.mapper._absolute_state = self.state.SWITCHING
+        self.mapper._absolute_session_id += 1
+
+    def test_fresh_quest_and_robot_feedback_do_not_queue_prepare(self):
+        # Represent the old automatic start condition after 30 accepted poses per arm.
+        self.mapper._initial_arm_samples = [0, 0]
+        for _ in range(120):
+            self.now += .01
+            self.fresh_feedback()
+            self.mapper._advance_fixed_request()
+            self.assertIsNone(self.mapper._fixed_pending_operation)
+            self.assertEqual(self.mapper._absolute_state, self.state.WAITING)
+            self.assertEqual(self.mapper._absolute_session_id, 0)
+        self.assertFalse(self.mapper._fixed_prepare_bootstrap)
+        self.assertFalse(self.mapper._fixed_operation_block)
+
+    def test_first_xa_keeps_existing_follow_entry(self):
+        # The wheel FSM maps reported operation mode 1 to follow on X+A.
+        self.assertEqual(self.mapper._fixed_operation_mode(), 1)
+        response = self.mapper.fixed_arm_operation_callback(NS(control_mode=2))
+        self.assertTrue(response.result)
+        self.assertEqual(response.mode, 2)
+        self.assertTrue(self.params['/absolute_velocity_ik/use_incremental_entry_pose'])
+        self.mapper._advance_fixed_request()
+        self.assertEqual(self.mapper._absolute_state, self.state.SWITCHING)
+        self.assertTrue(self.mapper._fixed_prepare_bootstrap)
+        self.assertTrue(self.mapper._absolute_resume_after_prepare)
 
 
 class PolicyTest(unittest.TestCase):

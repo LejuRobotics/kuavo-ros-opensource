@@ -630,8 +630,6 @@ class IkRos:
         model_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '../'))
         self.quest3_arm_info_transformer = Quest3ArmInfoTransformer(model_path, predict_gesture=predict_gesture, hand_reference_mode=hand_reference_mode)
         self.quest3_arm_info_transformer.incremental_clutch = bool(self._clutches)
-        self._initial_arm_samples = ([self.quest3_arm_info_transformer.arm_length_num] * 2
-                                     if self._clutches else None)
         if self.enable_velocity_ik_takeover:
             # Formal startup is admitted once by _controller_start_request.
             # Do not let the legacy 50-frame gesture path bypass that latch.
@@ -1619,6 +1617,10 @@ class IkRos:
             if self._fixed_prepare_bootstrap or self._absolute_state in (
                     AbsoluteEnableState.RETURNING_TO_PREP, AbsoluteEnableState.PREPARED):
                 return 1
+            # Keep the first X+A mapped to follow while IK waits without a session.
+            if (self._clutches and self._absolute_state == AbsoluteEnableState.WAITING
+                    and self._absolute_session_id == 0):
+                return 1
             return (2 if self._absolute_state == AbsoluteEnableState.ACTIVE
                     and not getattr(self, '_fixed_arm_hold', False) else 0)
 
@@ -1951,7 +1953,6 @@ class IkRos:
         rospy.set_param("/absolute_velocity_ik/use_incremental_entry_pose", bool(enabled))
 
     def _queue_fixed_request_locked(self, mode, phase):
-        self._initial_arm_samples = None
         if mode == 2:
             self._controller_start_consumed = True
         timeout = self._fixed_dependency_timeout if phase == 'dependencies' else self._fixed_prepare_timeout
@@ -2000,12 +2001,6 @@ class IkRos:
             # Sampling before acquiring it can make a fresh callback appear
             # to come from the future and spuriously cancel PREPARE.
             now = time.monotonic()
-            # Beta initializes arm mode 1 after both arms have supplied 30 poses.
-            if (getattr(self, '_initial_arm_samples', None) == [0, 0]
-                    and self._fixed_control_enabled and self._wheel_mpc_stable_for_mm_cmd()
-                    and self._fixed_capture_input_error_locked() is None):
-                self._fixed_operation_block = True
-                self._queue_fixed_request_locked(1, 'dependencies')
             p = self._fixed_pending_operation
             if p is None:
                 return
@@ -3965,10 +3960,6 @@ class IkRos:
             if target_available:
                 with profile.lock(self._absolute_lock):
                     self._last_valid_tcp_receive = received_monotonic
-                    if self._initial_arm_samples is not None:
-                        for arm, available in enumerate(self._side_available):
-                            if available and self._initial_arm_samples[arm] > 0:
-                                self._initial_arm_samples[arm] -= 1
             self.__target_pose = left_pose
             self.__left_elbow_pos = left_elbow_pos
             self.__target_pose_right = right_pose
