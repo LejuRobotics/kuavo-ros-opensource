@@ -1837,11 +1837,11 @@ class IkRos:
                 # A pause request with unavailable dependencies falls back to
                 # the existing whole-session hold below, never silent motion.
             self._fixed_arm_hold = False
-            if hasattr(self, '_torso_controls'):
+            if torso is not None:
                 if mode == 2:
-                    self._torso_controls.wait_for_follow()
+                    torso.wait_for_follow()
                 else:
-                    self._torso_controls.reset()
+                    torso.reset()
         if mode == 0:
             # End the input generation before the existing stopped-owner/hold
             # handshake. Partial service failures remain faults, never success.
@@ -1901,6 +1901,8 @@ class IkRos:
                         self._authorize_fixed_follow_locked()
                         return result(True, "Follow replaces pending PREPARE before execution")
                     # 进入增量的准备还没结束就按复位：改回启动臂姿。
+                    if torso is not None:
+                        torso.clear_operator_mode()
                     self._set_incremental_entry_pose(False)
                     pending['resume'] = False
                     self._absolute_resume_after_prepare = False
@@ -1914,6 +1916,8 @@ class IkRos:
                         self._pause_absolute_session()
                         pending.update(phase='prepare', generation=self._absolute_generation)
                     else:
+                        if torso is not None:
+                            torso.clear_operator_mode()
                         self._fixed_prepare_bootstrap = True
                     return result(True, "Follow acquisition replaced by PREPARE")
                 return result(True, "Request already pending; deadline unchanged (not completed)")
@@ -1923,6 +1927,8 @@ class IkRos:
                 self._fixed_operation_block = True
                 if state not in (AbsoluteEnableState.RETURNING_TO_PREP, AbsoluteEnableState.PREPARED):
                     self._pause_absolute_session()
+                elif torso is not None:
+                    torso.clear_operator_mode()
                 if state != AbsoluteEnableState.PREPARED:
                     self._queue_fixed_request_locked(1, 'prepare')
                 return result(True, "Pinocchio PREPARE requested; not yet a completion acknowledgement")
@@ -1943,6 +1949,8 @@ class IkRos:
                 return result(*self._interrupt_fixed_prepare_locked())
             self._fixed_operation_error = False
             self._fixed_operation_block = True
+            if mode == 1 and torso is not None:
+                torso.clear_operator_mode()
             # reset_joint_to_default: X+A into mode 2 first moves the arms to the
             # launch ready pose, then follow starts. False keeps the current joints.
             if mode == 2 and getattr(self, "_reset_to_default", False):
@@ -2496,7 +2504,7 @@ class IkRos:
         source_fault_cleared = False
         with self._absolute_lock:
             if hasattr(self, '_torso_controls'):
-                self._torso_controls.reset()
+                self._torso_controls.clear_operator_mode()
             self._bump_absolute_generation_locked()
             if (self._tracking_source_hold_latched
                     and self._tracking_can_rearm_locked()):

@@ -20,11 +20,11 @@ class TorsoControls:
         self._stick_neutral_required = True
         self._stick_key = None
         self._stick_count = 0
-        # Mode selection survives PREPARE and safety revocation; execution
-        # permission does not. Only an admitted explicit follow request or a
-        # fresh torso chord may restore permission after a revocation.
-        self.selected_enabled = bool(enable_on_first_follow)
-        self.startup_enable_pending = bool(enable_on_first_follow)
+        # Safety revocation retains the selection. X+A restores startup defaults.
+        self.default_enabled = bool(enable_on_first_follow)
+        self.selected_enabled = self.default_enabled
+        self.startup_enable_pending = self.default_enabled
+        self._reset_latched = False
         self.last_time = None
         self.chord_down = False
         self.require_release = True
@@ -46,6 +46,13 @@ class TorsoControls:
         self.startup_enable_pending = False
         self.wait_for_follow()
 
+    def clear_operator_mode(self):
+        """Restore startup selections and inhibit gestures until follow resumes."""
+        self.selected_enabled = self.default_enabled
+        self.position_enabled = True
+        self.reset()
+        self._reset_latched = True
+
     def wait_for_follow(self):
         """Inhibit during initial acquisition; never create/rearm permission."""
         self.enabled = False
@@ -57,7 +64,7 @@ class TorsoControls:
     def request_follow(self):
         """Restore the selected mode after an explicit, admitted follow request."""
         self.wait_for_follow()
-        self.startup_enable_pending = self.selected_enabled
+        self.startup_enable_pending = self.selected_enabled or self._reset_latched
 
     def _fresh_input(self, now):
         # Freshness admits button gestures; it does not change the operator's
@@ -198,19 +205,21 @@ class TorsoControls:
                     result.right_trigger = self.rt_hold
                     if not rt:
                         self.rt_released = True
+        reset_latched = self._reset_latched
         if (self.startup_enable_pending and ready and fresh and valid
                 and not stop and not arm):
-            self.enabled = True
+            self.enabled = self.selected_enabled
             self.startup_enable_pending = False
+            self._reset_latched = False
         if not chord:
             self.require_release = False
-        elif (toggle_edge and not self.require_release and ready and fresh
+        elif (toggle_edge and not self.require_release and not reset_latched and ready and fresh
               and valid and not stop and not arm):
             self.enabled = not self.enabled
             self.selected_enabled = self.enabled
         self.chord_down = chord
         self._update_stick(raw, now, ready, fresh, valid,
-                           stop or arm or chord or raw.left_second_button_pressed)
+                           stop or arm or chord or raw.left_second_button_pressed or reset_latched)
         self._record_permissions()
         if valid:
             self.last_hand = copy.copy(result)
