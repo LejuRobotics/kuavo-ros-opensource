@@ -21,6 +21,13 @@ class IncrementalLaunchTest(unittest.TestCase):
      self.assertEqual(cfg.params['/ik_ros_uni/teleop_mode'].value,'incremental')
      self.assertEqual(cfg.params['/ik_ros_uni/velocity_tcp_forearm_length'].value,.45)
      self.assertIn('UNCALIBRATED',cfg.params['/ik_ros_uni/velocity_tcp_geometry_id'].value)
+ def test_single_quest_incremental_enables_chest_sample_hold(self):
+  for extra, expected in (([], .05), (['vr_kalman_sample_hold_seconds:=0.0'], 0.)):
+   cfg=self.load('quest_velocity_ik.launch',['teleop_mode:=incremental','ee_type:=heiman']+extra)
+   self.assertEqual(cfg.params['/ik_ros_uni/vr_kalman_chest_sample_hold_seconds'].value,expected)
+   self.assertEqual(cfg.params['/ik_ros_uni/vr_kalman_position_sample_hold_seconds'].value,0.)
+  pico=self.load('pico_velocity_ik.launch',['teleop_mode:=incremental'])
+  self.assertEqual(pico.params['/ik_ros_uni/vr_kalman_chest_sample_hold_seconds'].value,0.)
  def test_dual_owner_and_shared_parameter_forwarding(self):
   for side in ('left','right'):
    cfg=self.load('dual_quest_incremental_velocity_ik.launch',['left_ip:=192.0.2.1','right_ip:=192.0.2.2','torso_control_side:='+side,'reference_transport:=ros','reference_shm_key:=454321','owner_shm_key:=454322'])
@@ -35,6 +42,7 @@ class IncrementalLaunchTest(unittest.TestCase):
     self.assertNotEqual(remaps[topic],topic)
    self.assertFalse(cfg.params['/'+secondary.name+'/publish_quest3_globals'].value)
    self.assertEqual(cfg.params['/ik_ros_uni/torso_control_side'].value,side)
+   self.assertEqual(cfg.params['/ik_ros_uni/vr_kalman_chest_sample_hold_seconds'].value,0.)
    self.assertEqual(cfg.params['/whole_body_velocity_ik/reference/transport'].value,'ros')
    self.assertEqual(cfg.params['/whole_body_velocity_ik/reference/shm_reference_key'].value,454321)
  def test_conflicting_modes_and_same_device_rejected(self):
