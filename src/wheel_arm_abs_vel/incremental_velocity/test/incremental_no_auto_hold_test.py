@@ -262,6 +262,32 @@ int main() {
             subprocess.run(['g++','-std=c++17','-I'+str(ROOT/'velocity_ik'),str(cpp),'-o',str(binary)],check=True)
             subprocess.run([str(binary)],check=True)
 
+    def test_prepare_settle_accepts_reached_pose_with_raw_velocity_chatter(self):
+        solver=(ROOT/'src/pinocchio_velocity_ik_node.cpp').read_text()
+        settle=solver[solver.index('const bool settled ='):solver.index('preparation_settle_cycles_ = settled')]
+        self.assertIn('reference_velocity <= preparation_velocity_tolerance_', settle)
+        self.assertIn('measured_velocity_settled', settle)
+        self.assertNotIn('selected_velocity', settle)
+        # Bag 2026-11-25-15-26-09_19, session 67: the arm sat on the entry pose
+        # for 18s. Reference speed was ~0 and position error was <0.01 rad, but
+        # wrist joint_v stayed above 0.030 rad/s often enough that 50 consecutive
+        # samples never happened (longest run 49). Chatter of 0.14 rad/s is
+        # inside the raw allowance and must count; a joint still moving at
+        # 0.40 rad/s must not.
+        reference_tol, measured_tol, cycles = 0.030, 0.150, 50
+        def settles(reference_speed, measured_speed, samples):
+            run=0
+            for _ in range(samples):
+                ok=(reference_speed<=reference_tol and measured_speed<=measured_tol)
+                run=run+1 if ok else 0
+                if run>=cycles:
+                    return True
+            return False
+        self.assertTrue(settles(0.0, 0.14, cycles))
+        self.assertFalse(settles(0.0, 0.14, cycles-1))
+        self.assertFalse(settles(0.05, 0.0, cycles*2))
+        self.assertFalse(settles(0.0, 0.40, cycles*2))
+
 
 if __name__=='__main__':
     unittest.main()

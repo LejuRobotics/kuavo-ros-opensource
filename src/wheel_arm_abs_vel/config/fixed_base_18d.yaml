@@ -39,6 +39,10 @@ preparation_lower_position: [0.0, 0.0, 0.0, 0.0]
 preparation_lower_position_tolerance: 0.008
 preparation_lower_measured_position_tolerance: 0.015
 preparation_velocity_tolerance: 0.030
+# Raw joint_v keeps chattering after the command has stopped on the ready pose.
+# These match startup_readiness arm_raw_speed / lower_raw_speed.
+preparation_measured_velocity_tolerance: 0.150
+preparation_lower_measured_velocity_tolerance: 0.100
 preparation_settle_cycles: 50
 # First acquisition only: independent of PREPARE completion and fault recovery.
 startup_readiness:
