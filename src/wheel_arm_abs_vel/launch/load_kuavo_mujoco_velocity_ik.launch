@@ -12,6 +12,7 @@
   <arg name="head_control_mode" default="vr_follow" doc="fixed / vr_follow / track_hand" />
   <arg name="head_track_hand" default="false" />
   <arg name="head_track_target" default="both_hands_midpoint" doc="head_control_mode:=track_hand 时：both_hands_midpoint / left_hand / right_hand / active_hand" />
+  <arg name="ee_type" default="auto" />
   <arg name="robot_version" default="$(optenv ROBOT_VERSION UNCONFIGURED_ROBOT_VERSION)" />
   <arg name="simulation_motor_servo" default="true" />
   <arg name="dynamics_backend" default="rnea" />
@@ -26,6 +27,7 @@
     <arg name="head_control_mode" value="$(arg head_control_mode)" />
     <arg name="head_track_hand" value="$(arg head_track_hand)" />
     <arg name="head_track_target" value="$(arg head_track_target)" />
+    <arg name="ee_type" value="$(arg ee_type)" />
     <arg name="robot_version" value="$(arg robot_version)" />
     <arg name="simulation_motor_servo" value="$(arg simulation_motor_servo)" />
     <arg name="dynamics_backend" value="$(arg dynamics_backend)" />

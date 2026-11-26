@@ -213,4 +213,4 @@ ctest --output-on-failure --timeout 180
 
 2026-10-19 发布候选已合入 dev 基线 02aba90958101c97808f24d6d370e8f0fc8d096a；在研扬 5.19 的独立验证目录原生编译通过，全部 45 项 CTest 通过（包含底盘门控、末端配置及 Quest/Pico 启动解析）。包外文件与该 dev 基线完全一致。编译、单元测试及解析通过不等于实机闭环验收；AGX 原生编译/运行、研扬 14 核实体机器、三机型完整 500Hz 性能与底盘执行仍需对应硬件验证。
 
-末端类型默认自动读取当前工作区 `kuavo_assets/config/kuavo_v<robot_version>/kuavo.json` 的 `EndEffectorType: [左, 右]`，无需填写 `ee_type`。与 dev 控制器使用同一配置；不再按机型硬编码强脑或黑漫。Quest/Pico 均支持强脑 `qiangnao`、黑漫 `heiman`、夹爪 `lejuclaw`；仅黑漫启动 SG100 转发。可选 `ee_type:=...` 显式覆盖输入映射，不改写硬件配置。缺失、未知或左右不同类型会明确报错，不能静默按强脑启动。
+5W 全身 IK 主控默认使用 `ee_type:=auto`，从当前工作区 `kuavo_assets/config/kuavo_v<robot_version>/kuavo.json` 读取 `EndEffectorType`。绝对式和增量式共用该选择，机身 CAN 清单只用于底层通信配置。实际换装末端时，在主控启动命令传入对应类型，例如 `ee_type:=lejuclaw`。Quest/Pico 沿用 `auto` 即可，也可传相同值。黑漫手 `heiman` 会启动 SG100 转发。自动选择要求左右类型相同且受支持，配置不符合时启动会报错。

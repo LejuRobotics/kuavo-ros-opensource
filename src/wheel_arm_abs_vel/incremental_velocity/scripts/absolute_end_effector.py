@@ -1,4 +1,4 @@
-"""Reuse test machine/model selection; reject unsupported incremental adapters."""
+"""Use the shared controller selection and check incremental adapter support."""
 from pathlib import Path
 import runpy
 import rospkg
