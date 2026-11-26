@@ -4293,6 +4293,7 @@ class IkRos:
                 clutch.pause_chest = None
                 clutch.regrip_input = None
                 clutch.rotation_only_input = None
+                clutch.regrip_elbow_gate = None
                 clutch.held_edge = None
             prior = None if clutch.key != key else clutch.position.copy()
             ordinary_grip = (self._side_available[arm] and modes.active[arm]
@@ -4312,16 +4313,24 @@ class IkRos:
                     entering = True
             if not ordinary_grip or not engaged:
                 clutch.rotation_only_input = None
+                clutch.regrip_elbow_gate = None
             elif entering and clutch.frozen_base is not None:
                 clutch.rotation_only_input = ((hand, e)
                     if clutch.is_rotation_only_regrip(hand, R) else None)
+                # Small upper-arm drift while released does not justify
+                # pulling the robot's elbow toward an absolute human hint.
+                clutch.regrip_elbow_gate = ((hand, e)
+                    if clutch.rotation_only_input is None and clutch.defer_elbow_on_regrip(e) else None)
             elif (clutch.rotation_only_input is not None
-                    and clutch.rotation_only_input_moved(hand, e)):
+                    and clutch.regrip_position_moved(clutch.rotation_only_input, hand, e)):
                 # Resume wrist translation from this sample. The displacement
                 # used to detect intent must not become a one-frame position step.
                 clutch.rotation_only_input = None
                 clutch.previous = hand.copy()
                 v.fill(0.)
+            if (clutch.regrip_elbow_gate is not None
+                    and clutch.regrip_position_moved(clutch.regrip_elbow_gate, hand, e)):
+                clutch.regrip_elbow_gate = None
             if ordinary_grip and (engaged or clutch.regrip_input is None):
                 clutch.regrip_input = (hand, R, e)
             if msg.arm_hold and not clutch.paused:
@@ -4345,6 +4354,7 @@ class IkRos:
                 clutch.elbow = None if world_e is None else base[0].T @ (world_e-base[1])
             entry_source_rotation = R.copy()
             rotation_only = clutch.rotation_only_input is not None
+            defer_elbow = clutch.regrip_elbow_gate is not None
             if rotation_only:
                 hand = clutch.rotation_only_input[0]
                 v.fill(0.)
@@ -4405,17 +4415,21 @@ class IkRos:
                 # depends on J7, so the solver cannot recover it from a stale TCP offset.
                 msg.wrist_rotation_only[arm] = True
                 msg.link6_position[arm].x, msg.link6_position[arm].y, msg.link6_position[arm].z = p
+            if rotation_only or defer_elbow:
                 setattr(msg, elbow_valid, False)
                 if (getattr(feedback, 'command_geometry_valid', False)
                         and feedback.command_clutch_seq[arm] == edge[0]
                         and feedback.command_operation_seq == edge[1]):
                     clutch.elbow = xyz(feedback.command_mapper_elbow[arm])
-                e = clutch.elbow
+                elif defer_elbow and not entering:
+                    clutch.elbow = xyz(feedback.mapper_elbow[arm])
+                e = clutch.elbow if rotation_only else None
+                setattr(msg, side+"_elbow_velocity", Vector3())
             elif engaged and e is None and self._side_available[arm]:
                 e = xyz(feedback.mapper_elbow[arm])
                 setattr(msg, elbow_valid, True)
             if not engaged or entering or rotation_only:
-                if clutch.elbow is not None:
+                if clutch.elbow is not None and not defer_elbow:
                     e = clutch.elbow.copy()
                 clutch.elbow_offset = None
                 setattr(msg, side+"_elbow_velocity", Vector3())
@@ -4444,7 +4458,8 @@ class IkRos:
             if e is not None:
                 elbow_msg.x, elbow_msg.y, elbow_msg.z = e
             clutch.position, clutch.rotation = p.copy(), R.copy()
-            clutch.elbow = None if e is None else e.copy()
+            if not defer_elbow:
+                clutch.elbow = None if e is None else e.copy()
             lever = R @ offset
             p, v = p - lever, v - np.cross(w, lever)
             pose = getattr(msg, side + "_tcp_pose")
