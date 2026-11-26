@@ -767,7 +767,7 @@ build_project() {
     
     # 配置并编译
     sudo -E su -c "catkin config -DCMAKE_ASM_COMPILER=/usr/bin/as -DCMAKE_BUILD_TYPE=Release"
-    sudo -E su -c "source installed/setup.bash && catkin build humanoid_controllers"
+    sudo -E su -c "export LD_LIBRARY_PATH=/opt/drake/lib && source installed/setup.bash && catkin build humanoid_controllers"
     
     print_success "项目编译完成"
 }
