@@ -91,9 +91,23 @@ bool AmpAssembleController::initialize() {
       }));
     subscribers_.push_back(nh_.subscribe<std_msgs::String>("/humanoid_mpc_gait_name_request", 10,
       [this](const std_msgs::String::ConstPtr& msg) {
-        std::lock_guard<std::mutex> lock(input_mutex_);
-        gait_walk_ = msg->data == "walk" || msg->data == "trot";
-        gait_stamp_ = ros::Time::now();
+        // 成员已关闭自身步态名话题订阅，由族唯一订阅并在 gait_dispatch_mutex_ 下统一分发。
+        std::lock_guard<std::mutex> dispatch_lock(gait_dispatch_mutex_);
+        {
+          std::lock_guard<std::mutex> lock(input_mutex_);
+          gait_walk_ = msg->data == "walk" || msg->data == "trot";
+          if (gait_walk_) {
+            walking_gait_name_ = msg->data;
+            // 一次性请求：由下一次 MANIPULATE->WALK 切换消费（见 advance()）
+            walk_request_pending_ = true;
+          } else {
+            walk_request_pending_ = false;
+          }
+          gait_stamp_ = ros::Time::now();
+        }
+        for (auto& m : members_) {
+          if (m) static_cast<AmpFamilyMemberController*>(m.get())->handleGaitNameRequest(msg->data);
+        }
       }));
     subscribers_.push_back(nh_.subscribe<std_msgs::Float64MultiArray>("/humanoid/mpc/arm_control_mode", 10,
       [this](const std_msgs::Float64MultiArray::ConstPtr& msg) {
@@ -199,6 +213,7 @@ void AmpAssembleController::reset() {
   for (auto& m : members_) if (m) { m->setGaitExecutionGate(false, true); m->reset(); }
   { std::lock_guard<std::mutex> input_lock(input_mutex_);
     gait_walk_ = false; gait_stamp_ = ros::Time();
+    walking_gait_name_ = "walk"; walk_request_pending_ = false;
     elbow_sample_time_ = elbow_received_time_ = 0.0;
   }
   std::lock_guard<std::mutex> lock(policy_mutex_);
@@ -304,6 +319,10 @@ std::optional<bool> AmpAssembleController::requestFamilyExit(bool to_rl) {
   if (!policy_.directRlExit()) walking_allowed_ = false;
   external_allowed_ = false;
   external_handoff_pending_ = pending_external_mode_ = false;
+  {
+    std::lock_guard<std::mutex> input_lock(input_mutex_);
+    walk_request_pending_ = false;
+  }
   return policy_.exitReady();
 }
 void AmpAssembleController::cancelFamilyExit() {
@@ -334,6 +353,11 @@ void AmpAssembleController::refreshCommandGates(const AmpFamilyPolicy::Input& in
   std::lock_guard<std::mutex> lock(policy_mutex_);
   walking_allowed_ = isActive() && policy_.walkingAllowed(in);
   external_allowed_ = isActive() && policy_.externalAllowed();
+  // 行走请求已被当前 WALK 成员接受，不再留给后续切换
+  if (walking_allowed_) {
+    std::lock_guard<std::mutex> input_lock(input_mutex_);
+    walk_request_pending_ = false;
+  }
   // A manipulation handoff holds stance independently of residual body speed;
   // the physical entry-speed check remains in the policy transition guard.
   const bool hold_stance = in.body_speed <= stop_speed_ || policy_.manipulationStanceRequired(in);
@@ -441,12 +465,14 @@ void AmpAssembleController::advance(bool outer_blend_active) {
       confirmed_input.arm_ready = confirmed_input.arm_ready && arm->isMeasuredArmAtDefault();
   }
   const char* rejection_reason = "request_changed";
+  bool exiting_now = false;
   {
     std::lock_guard<std::mutex> lock(policy_mutex_);
     // A ROS request can replace the intent while target preparation runs.
     const auto confirmed = policy_.evaluate(confirmed_input);
     if (!confirmed) rejection_reason = policy_.status().reason;
     if (confirmed && *confirmed == *next) {
+      exiting_now = policy_.exiting();
       policy_.beginTransition(*next, confirmed_input.now);
       soft_exit_arm_mode_.reset();
       active_.store(target); blend_source_ = source;
@@ -456,6 +482,27 @@ void AmpAssembleController::advance(bool outer_blend_active) {
     }
   }
   if (!committed) { target->pause(); publishStatus(confirmed_input, rejection_reason, true); return; }
+  // 由行走请求(A/步态名)发起且非退出的 MANIPULATE->WALK：在重置目标后把本次请求
+  // 补发给刚提交的 WALK 成员，并与话题分发共用 gait_dispatch_mutex_ 严格串行。
+  if (*next == Role::Walk && source == member(Role::Manipulate) && !exiting_now)
+  {
+    std::lock_guard<std::mutex> dispatch_lock(gait_dispatch_mutex_);
+    std::string walking_gait_name;
+    bool deliver_walk = false;
+    {
+      std::lock_guard<std::mutex> lock(input_mutex_);
+      if (walk_request_pending_)
+      {
+        walk_request_pending_ = false;
+        walking_gait_name = walking_gait_name_;
+        deliver_walk = true;
+      }
+    }
+    if (deliver_walk)
+    {
+      static_cast<AmpFamilyMemberController*>(target)->handleGaitNameRequest(walking_gait_name);
+    }
+  }
   if(source==member(Role::Run) && *next==Role::Walk && thermal_exit_since_>=0) {
     thermal_timed_out_=false;
     for(auto& model:members_) if(model)

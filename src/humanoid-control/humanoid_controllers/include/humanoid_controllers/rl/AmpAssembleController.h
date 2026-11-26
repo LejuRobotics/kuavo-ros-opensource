@@ -110,6 +110,8 @@ class AmpAssembleController final : public RLControllerBase {
   std::array<std::unique_ptr<RLControllerBase>,5> members_;
   std::atomic<RLControllerBase*> active_{nullptr};
   mutable std::mutex policy_mutex_, input_mutex_;
+  // 串行化步态名话题分发与 MANIPULATE->WALK 补发，避免与成员独立回调竞态。
+  mutable std::mutex gait_dispatch_mutex_;
   // Serializes member preparation with ROS-side pause/reset. Never held during update().
   mutable std::recursive_mutex lifecycle_mutex_;
   AmpFamilyPolicy policy_;
@@ -136,6 +138,9 @@ class AmpAssembleController final : public RLControllerBase {
   geometry_msgs::Twist command_;
   ros::Time command_stamp_, gait_stamp_, external_stamp_, action_stamp_;
   bool gait_walk_ = false, action_active_ = false;
+  // 待消费的行走请求：受 input_mutex_ 保护，由下一次 MANIPULATE->WALK 切换带给 WALK 成员。
+  bool walk_request_pending_ = false;
+  std::string walking_gait_name_{"walk"}; // 受 input_mutex_ 保护
   double command_timeout_ = 0.5, external_timeout_ = 0.5;
   double switch_duration_ = 0.5;
   double stop_speed_ = 0.3;

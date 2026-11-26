@@ -115,7 +115,8 @@ public:
 class RlGaitReceiver
 {
 public:
-  RlGaitReceiver(ros::NodeHandle& nh, CommandDataRL* initialCommand = nullptr);
+  RlGaitReceiver(ros::NodeHandle& nh, CommandDataRL* initialCommand = nullptr,
+                 bool subscribe_gait_name = true);
   ~RlGaitReceiver() = default;
 
   // Main update method called from humanoidController
@@ -141,6 +142,8 @@ public:
 
   //waao
   void resetCommandState(bool stance_mode = true);
+  /// 处理步态名请求（"stance" / "walk" / "trot"），供话题回调或族控制器统一分发。
+  void handleGaitNameRequest(const std::string& gait_name);
   void overrideCommandState(const CommandDataRL& command);
   /// Warm handoff: copy filter state, not source scaling/biases.
   void inheritCommandState(const RlGaitReceiver& source);
@@ -188,6 +191,10 @@ private:
   void cmdVelCallback(const geometry_msgs::Twist::ConstPtr& msg);
   void cmdPoseCallback(const geometry_msgs::Twist::ConstPtr& msg);
   void gaitNameCallback(const std_msgs::String::ConstPtr& msg);
+  /// 应用一次行走步态请求（调用方须持 command_mutex_）
+  void applyWalkingGaitLocked(const std::string& gait_name);
+  /// 恢复站立模式并清空挂起步态（调用方须持 command_mutex_）
+  void applyStanceLocked();
   void robotActionStateCallback(const humanoid_plan_arm_trajectory::RobotActionState::ConstPtr& msg);
   bool isRobotActionActiveLocked(const ros::Time& now) const;
   /// 动作期间是否允许继续行走：v17 或控制器本地原子标志
