@@ -151,8 +151,8 @@
     <param name="/timeout_warning_ms" value="20"/>
 
     <!-- SG100 hand params -->
-    <param name="sg100_left_port" value="/dev/lefthand" />
-    <param name="sg100_right_port" value="/dev/righthand" />
+    <param name="sg100_left_port" value="/dev/LJ485A" />
+    <param name="sg100_right_port" value="/dev/LJ485B" />
     <param name="sg100_baudrate" value="1000000" />
     <param name="sg100_control_rate" value="100.0" />
     <param name="sg100_publish_joint_states" value="true" />

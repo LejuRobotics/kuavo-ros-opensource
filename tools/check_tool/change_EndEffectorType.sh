@@ -84,6 +84,7 @@ lejuclaw_total=0
 none_total=0
 qibeng_total=0
 linker_hand_total=0
+heiman_total=0
 
 for file in "${files_to_check[@]}"; do
     # 检查各种格式
@@ -93,6 +94,12 @@ for file in "${files_to_check[@]}"; do
     none_count=$(grep -oE '("None"|"none"|default="none")' "$file" 2>/dev/null | wc -l)
     qibeng_count=$(grep -oE '("Qibeng"|"qibeng"|default="qibeng")' "$file" 2>/dev/null | wc -l)
     linker_hand_count=$(grep -oE '("linker_hand"|"Linker_hand"|default="linker_hand")' "$file" 2>/dev/null | wc -l)
+    heiman_count=$(grep -oE '("heiman"|"Heiman"|default="heiman")' "$file" 2>/dev/null | wc -l)
+    # 黑漫配置也可能在其他字段使用 "none"，仅统计实际末端配置。
+    if [[ "$file" == *.json ]] && [ "$heiman_count" -gt 0 ]; then
+        none_count=$(sed -n '/"EndEffectorType"[[:space:]]*:/ { :array; /\]/! { N; b array; }; p; }' "$file" |
+            grep -oE '"(None|none)"' | wc -l)
+    fi
     
     qiangnao_total=$((qiangnao_total + qiangnao_count))
     qiangnao_touch_total=$((qiangnao_touch_total + qiangnao_touch_count))
@@ -100,22 +107,25 @@ for file in "${files_to_check[@]}"; do
     none_total=$((none_total + none_count))
     qibeng_total=$((qibeng_total + qibeng_count))
     linker_hand_total=$((linker_hand_total + linker_hand_count))
+    heiman_total=$((heiman_total + heiman_count))
 done
 
 # 判断当前配置的末端执行器类型
-if [ "$qiangnao_total" -gt 0 ] && [ "$qiangnao_touch_total" -eq 0 ] && [ "$lejuclaw_total" -eq 0 ] && [ "$none_total" -eq 0 ] && [ "$qibeng_total" -eq 0 ] && [ "$linker_hand_total" -eq 0 ]; then
+if [ "$qiangnao_total" -gt 0 ] && [ "$qiangnao_touch_total" -eq 0 ] && [ "$lejuclaw_total" -eq 0 ] && [ "$none_total" -eq 0 ] && [ "$qibeng_total" -eq 0 ] && [ "$linker_hand_total" -eq 0 ] && [ "$heiman_total" -eq 0 ]; then
     current_type="qiangnao"
-elif [ "$qiangnao_touch_total" -gt 0 ] && [ "$qiangnao_total" -eq 0 ] && [ "$lejuclaw_total" -eq 0 ] && [ "$none_total" -eq 0 ] && [ "$qibeng_total" -eq 0 ] && [ "$linker_hand_total" -eq 0 ]; then
+elif [ "$qiangnao_touch_total" -gt 0 ] && [ "$qiangnao_total" -eq 0 ] && [ "$lejuclaw_total" -eq 0 ] && [ "$none_total" -eq 0 ] && [ "$qibeng_total" -eq 0 ] && [ "$linker_hand_total" -eq 0 ] && [ "$heiman_total" -eq 0 ]; then
     current_type="qiangnao_touch"
-elif [ "$lejuclaw_total" -gt 0 ] && [ "$qiangnao_total" -eq 0 ] && [ "$qiangnao_touch_total" -eq 0 ] && [ "$none_total" -eq 0 ] && [ "$qibeng_total" -eq 0 ] && [ "$linker_hand_total" -eq 0 ]; then
+elif [ "$lejuclaw_total" -gt 0 ] && [ "$qiangnao_total" -eq 0 ] && [ "$qiangnao_touch_total" -eq 0 ] && [ "$none_total" -eq 0 ] && [ "$qibeng_total" -eq 0 ] && [ "$linker_hand_total" -eq 0 ] && [ "$heiman_total" -eq 0 ]; then
     current_type="lejuclaw"
-elif [ "$none_total" -gt 0 ] && [ "$qiangnao_total" -eq 0 ] && [ "$qiangnao_touch_total" -eq 0 ] && [ "$lejuclaw_total" -eq 0 ] && [ "$qibeng_total" -eq 0 ] && [ "$linker_hand_total" -eq 0 ]; then
+elif [ "$none_total" -gt 0 ] && [ "$qiangnao_total" -eq 0 ] && [ "$qiangnao_touch_total" -eq 0 ] && [ "$lejuclaw_total" -eq 0 ] && [ "$qibeng_total" -eq 0 ] && [ "$linker_hand_total" -eq 0 ] && [ "$heiman_total" -eq 0 ]; then
     current_type="none"
-elif [ "$qibeng_total" -gt 0 ] && [ "$qiangnao_total" -eq 0 ] && [ "$qiangnao_touch_total" -eq 0 ] && [ "$lejuclaw_total" -eq 0 ] && [ "$none_total" -eq 0 ] && [ "$linker_hand_total" -eq 0 ]; then
+elif [ "$qibeng_total" -gt 0 ] && [ "$qiangnao_total" -eq 0 ] && [ "$qiangnao_touch_total" -eq 0 ] && [ "$lejuclaw_total" -eq 0 ] && [ "$none_total" -eq 0 ] && [ "$linker_hand_total" -eq 0 ] && [ "$heiman_total" -eq 0 ]; then
     current_type="qibeng"
-elif [ "$linker_hand_total" -gt 0 ] && [ "$qiangnao_total" -eq 0 ] && [ "$qiangnao_touch_total" -eq 0 ] && [ "$lejuclaw_total" -eq 0 ] && [ "$none_total" -eq 0 ] && [ "$qibeng_total" -eq 0 ]; then
+elif [ "$linker_hand_total" -gt 0 ] && [ "$qiangnao_total" -eq 0 ] && [ "$qiangnao_touch_total" -eq 0 ] && [ "$lejuclaw_total" -eq 0 ] && [ "$none_total" -eq 0 ] && [ "$qibeng_total" -eq 0 ] && [ "$heiman_total" -eq 0 ]; then
     current_type="linker_hand"
-elif [ "$qiangnao_total" -eq 0 ] && [ "$qiangnao_touch_total" -eq 0 ] && [ "$lejuclaw_total" -eq 0 ] && [ "$none_total" -eq 0 ] && [ "$qibeng_total" -eq 0 ] && [ "$linker_hand_total" -eq 0 ]; then
+elif [ "$heiman_total" -gt 0 ] && [ "$qiangnao_total" -eq 0 ] && [ "$qiangnao_touch_total" -eq 0 ] && [ "$lejuclaw_total" -eq 0 ] && [ "$none_total" -eq 0 ] && [ "$qibeng_total" -eq 0 ] && [ "$linker_hand_total" -eq 0 ]; then
+    current_type="heiman"
+elif [ "$qiangnao_total" -eq 0 ] && [ "$qiangnao_touch_total" -eq 0 ] && [ "$lejuclaw_total" -eq 0 ] && [ "$none_total" -eq 0 ] && [ "$qibeng_total" -eq 0 ] && [ "$linker_hand_total" -eq 0 ] && [ "$heiman_total" -eq 0 ]; then
     current_type="none"
 else
     current_type="mixed"
@@ -124,7 +134,7 @@ fi
 # 显示当前配置
 echo -e "${YELLOW}当前配置的末端执行器类型:${NC}"
 if [ "$current_type" = "mixed" ]; then
-    echo -e "  ${YELLOW}混合配置 (qiangnao: $qiangnao_total, qiangnao_touch: $qiangnao_touch_total, lejuclaw: $lejuclaw_total, none: $none_total, qibeng: $qibeng_total, linker_hand: $linker_hand_total)${NC}"
+    echo -e "  ${YELLOW}混合配置 (qiangnao: $qiangnao_total, qiangnao_touch: $qiangnao_touch_total, lejuclaw: $lejuclaw_total, none: $none_total, qibeng: $qibeng_total, linker_hand: $linker_hand_total, heiman: $heiman_total)${NC}"
 else
     echo -e "  ${GREEN}$current_type${NC}"
     if [ "$current_type" = "qiangnao" ]; then
@@ -139,6 +149,8 @@ else
         echo -e "  (出现次数: $qibeng_total)"
     elif [ "$current_type" = "linker_hand" ]; then
         echo -e "  (出现次数: $linker_hand_total)"
+    elif [ "$current_type" = "heiman" ]; then
+        echo -e "  (出现次数: $heiman_total)"
     fi
 fi
 echo ""
@@ -151,11 +163,12 @@ echo -e "${GREEN}3.${NC} none"
 echo -e "${GREEN}4.${NC} qiangnao_touch"
 echo -e "${GREEN}5.${NC} qibeng"
 echo -e "${GREEN}6.${NC} linker_hand"
+echo -e "${GREEN}7.${NC} heiman"
 echo -e "${GREEN}q.${NC} 退出"
 echo ""
 
 while true; do
-    read -p "请选择 (1/2/3/4/5/6/q): " choice
+    read -p "请选择 (1/2/3/4/5/6/7/q): " choice
     case "$choice" in
         1)
             target_type="qiangnao"
@@ -181,12 +194,16 @@ while true; do
             target_type="linker_hand"
             break
             ;;
+        7)
+            target_type="heiman"
+            break
+            ;;
         q|Q)
             echo -e "${YELLOW}操作已取消${NC}"
             exit 0
             ;;
         *)
-            echo -e "${RED}无效选择，请输入 1、2、3、4、5、6 或 q${NC}"
+            echo -e "${RED}无效选择，请输入 1、2、3、4、5、6、7 或 q${NC}"
             ;;
     esac
 done
@@ -227,6 +244,7 @@ for file in "${files_to_process[@]}"; do
             sed -i 's/"lejuclaw"/"None"/g' "$file"
             sed -i 's/"qibeng"/"None"/g' "$file"
             sed -i 's/"linker_hand"/"None"/g' "$file"
+            sed -i 's/"heiman"/"None"/g' "$file"
             sed -i 's/"None"/"None"/g' "$file"  # 确保已经是 None
             echo -e "${GREEN}✓ JSON 文件已更新为 None${NC}"
         else
@@ -236,6 +254,7 @@ for file in "${files_to_process[@]}"; do
             sed -i "s/\"lejuclaw\"/\"$target_type\"/g" "$file"
             sed -i "s/\"qibeng\"/\"$target_type\"/g" "$file"
             sed -i "s/\"linker_hand\"/\"$target_type\"/g" "$file"
+            sed -i "s/\"heiman\"/\"$target_type\"/g" "$file"
             sed -i "s/\"None\"/\"$target_type\"/g" "$file"
             echo -e "${GREEN}✓ JSON 文件已更新为 $target_type${NC}"
         fi
@@ -247,6 +266,7 @@ for file in "${files_to_process[@]}"; do
             sed -i 's/default="lejuclaw"/default="none"/g' "$file"
             sed -i 's/default="qibeng"/default="none"/g' "$file"
             sed -i 's/default="linker_hand"/default="none"/g' "$file"
+            sed -i 's/default="heiman"/default="none"/g' "$file"
             sed -i 's/default="none"/default="none"/g' "$file"  # 确保已经是 none
             echo -e "${GREEN}✓ Launch 文件已更新为 none${NC}"
         else
@@ -255,6 +275,7 @@ for file in "${files_to_process[@]}"; do
             sed -i "s/default=\"lejuclaw\"/default=\"$target_type\"/g" "$file"
             sed -i "s/default=\"qibeng\"/default=\"$target_type\"/g" "$file"
             sed -i "s/default=\"linker_hand\"/default=\"$target_type\"/g" "$file"
+            sed -i "s/default=\"heiman\"/default=\"$target_type\"/g" "$file"
             sed -i "s/default=\"none\"/default=\"$target_type\"/g" "$file"
             echo -e "${GREEN}✓ Launch 文件已更新为 $target_type${NC}"
         fi
@@ -266,6 +287,7 @@ for file in "${files_to_process[@]}"; do
             sed -i 's/lejuclaw/none/g' "$file"
             sed -i 's/qibeng/none/g' "$file"
             sed -i 's/linker_hand/none/g' "$file"
+            sed -i 's/heiman/none/g' "$file"
             echo -e "${GREEN}✓ 文件已更新为 none${NC}"
         else
             sed -i "s/qiangnao/$target_type/g" "$file"
@@ -273,6 +295,7 @@ for file in "${files_to_process[@]}"; do
             sed -i "s/lejuclaw/$target_type/g" "$file"
             sed -i "s/qibeng/$target_type/g" "$file"
             sed -i "s/linker_hand/$target_type/g" "$file"
+            sed -i "s/heiman/$target_type/g" "$file"
             echo -e "${GREEN}✓ 文件已更新为 $target_type${NC}"
         fi
     fi

@@ -12,8 +12,8 @@
 
 <launch>
     <!-- Arguments -->
-    <arg name="sg100_left_port" default="/dev/lefthand" />
-    <arg name="sg100_right_port" default="/dev/righthand" />
+    <arg name="sg100_left_port" default="/dev/LJ485A" />
+    <arg name="sg100_right_port" default="/dev/LJ485B" />
     <arg name="sg100_baudrate" default="1000000" />
     <arg name="sg100_control_rate" default="100.0" />
     <arg name="sg100_cmd_filter_alpha" default="0.2" />

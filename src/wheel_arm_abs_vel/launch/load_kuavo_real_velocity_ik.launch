@@ -246,8 +246,8 @@
   <group if="$(arg use_custom_arm_prepare)">
     <rosparam command="load" file="$(find humanoid_controllers)/config/arm_prepare_pose.yaml" ns="arm_prepare" />
   </group>
-  <param name="sg100_left_port" value="/dev/lefthand" />
-  <param name="sg100_right_port" value="/dev/righthand" />
+  <param name="sg100_left_port" value="/dev/LJ485A" />
+  <param name="sg100_right_port" value="/dev/LJ485B" />
   <param name="sg100_baudrate" value="1000000" />
   <param name="sg100_control_rate" value="100.0" />
   <param name="sg100_publish_joint_states" value="true" />
