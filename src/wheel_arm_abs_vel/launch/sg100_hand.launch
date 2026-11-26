@@ -1,6 +1,6 @@
 <launch>
-  <arg name="left_port" default="/dev/lefthand" />
-  <arg name="right_port" default="/dev/righthand" />
+  <arg name="left_port" default="/dev/LJ485A" />
+  <arg name="right_port" default="/dev/LJ485B" />
   <arg name="baudrate" default="1000000" />
   <arg name="start_driver" default="true" />
   <arg name="start_mapper_bridge" default="false" />

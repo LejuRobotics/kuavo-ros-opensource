@@ -622,8 +622,8 @@ Pico App 继续通过“查找机器人”发现 `KUAVO`：输入进程在未收
 
 | 参数 | 声明类型 | 源码值 | 说明 |
 | --- | --- | --- | --- |
-| left_port | default | /dev/lefthand |  |
-| right_port | default | /dev/righthand |  |
+| left_port | default | /dev/LJ485A |  |
+| right_port | default | /dev/LJ485B |  |
 | baudrate | default | 1000000 |  |
 | start_driver | default | true |  |
 | start_mapper_bridge | default | false |  |
@@ -1339,8 +1339,8 @@ kd: [150, 150, 80, 30, 20, 10, 10, 10, 6, 6, 6, 20, 10, 10, 10, 6, 6, 6, 1, 1]
 <param name="/pinocchio_deployment/LEGACY_NORMAL_QUICK_SWITCH" value="DISABLED" type="str" />
 <param name="/pinocchio_deployment/IK_PIPELINE" value="PINOCCHIO_VELOCITY" type="str" />
 <param name="use_custom_arm_prepare" type="bool" value="$(arg use_custom_arm_prepare)" />
-<param name="sg100_left_port" value="/dev/lefthand" />
-<param name="sg100_right_port" value="/dev/righthand" />
+<param name="sg100_left_port" value="/dev/LJ485A" />
+<param name="sg100_right_port" value="/dev/LJ485B" />
 <param name="sg100_baudrate" value="1000000" />
 <param name="sg100_control_rate" value="100.0" />
 <param name="sg100_publish_joint_states" value="true" />

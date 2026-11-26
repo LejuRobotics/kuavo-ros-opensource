@@ -14,7 +14,7 @@
  *
  * roslaunch 示例:
  *   roslaunch motion_capture_ik sg100_hand_control.launch
- *     sg100_left_port:=/dev/lefthand sg100_right_port:=/dev/righthand
+ *     sg100_left_port:=/dev/LJ485A sg100_right_port:=/dev/LJ485B
  *     sg100_baudrate:=1000000 sg100_control_rate:=100.0 sg100_cmd_filter_alpha:=0.2
  *
  * 命令位置在话题上为弧度,下发 SDK 时换算为度(rad * 180/pi → deg);
@@ -242,8 +242,8 @@ SG100HandROSNode::~SG100HandROSNode() {
 
 bool SG100HandROSNode::initialize() {
     // Load parameters
-    pnh_.param<std::string>("sg100_left_port", left_port_, "/dev/lefthand");
-    pnh_.param<std::string>("sg100_right_port", right_port_, "/dev/righthand");
+    pnh_.param<std::string>("sg100_left_port", left_port_, "/dev/LJ485A");
+    pnh_.param<std::string>("sg100_right_port", right_port_, "/dev/LJ485B");
     pnh_.param<int>("sg100_baudrate", baudrate_, 1000000);
     // SG100 参数统一加 sg100_ 前缀：避免 /control_rate、/position_kp 这类泛名与其它模块撞车。
     // 驱动只在 end_effector_type == heiman 时被创建（见 hardware_node.cc），故这些参数仅黑漫机型生效。
