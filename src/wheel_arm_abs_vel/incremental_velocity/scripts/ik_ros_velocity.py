@@ -1888,11 +1888,11 @@ class IkRos:
                         if error:
                             return result(False, error)
                         if getattr(self, "_reset_to_default", False):
-                            # 复位还在走时再按 X+A：改去准备姿态，不要按当前关节角接管。
+                            # 复位还在走时再按 X+A：改为双臂回零后进入跟随。
                             self._set_incremental_entry_pose(True)
                             pending['resume'] = True
                             self._absolute_resume_after_prepare = True
-                            return result(True, "X+A entry retargets PREPARE to the ready pose")
+                            return result(True, "X+A entry retargets PREPARE to arm zero")
                         if state == AbsoluteEnableState.RETURNING_TO_PREP:
                             return result(*self._interrupt_fixed_prepare_locked())
                         # reset_joint_to_default is false: follow from the current joints.
@@ -1947,14 +1947,13 @@ class IkRos:
                     if self._fixed_pending_operation is not None:
                         self._fixed_pending_operation['mode'] = 1
                         self._fixed_pending_operation['resume'] = True
-                    return result(True, "X+A entry retargets the live PREPARE to the ready pose")
+                    return result(True, "X+A entry retargets the live PREPARE to arm zero")
                 return result(*self._interrupt_fixed_prepare_locked())
             self._fixed_operation_error = False
             self._fixed_operation_block = True
             if mode == 1 and torso is not None:
                 torso.clear_operator_mode()
-            # reset_joint_to_default: X+A into mode 2 first moves the arms to the
-            # launch ready pose, then follow starts. False keeps the current joints.
+            # With reset_joint_to_default, move both arms to zero before following.
             if mode == 2 and getattr(self, "_reset_to_default", False):
                 self._set_incremental_entry_pose(True)
                 self._queue_fixed_request_locked(1, 'dependencies')

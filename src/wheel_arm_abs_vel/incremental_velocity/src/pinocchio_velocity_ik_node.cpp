@@ -98,6 +98,9 @@ using DecisionJacobian3d =
 using Matrix3x7d = Eigen::Matrix<double, 3, kJointsPerArm>;
 using Matrix6x7d = Eigen::Matrix<double, 6, kJointsPerArm>;
 constexpr int kTorsoConstraintCount = 4;
+// WheelQuest3IkIncrementalTools mode-2 entry, in seconds from acquisition.
+constexpr double kEntryArmSyncDuration = 0.3;
+constexpr double kEntryArmDuration = 2.0;
 // Sensor/decision lower-body order is [knee, leg, waist_pitch, waist_yaw].
 // Behavioural admission follows physical drivability from the top down.
 constexpr std::array<int, kLowerBodyDof> kLowerRecruitmentOrder{3, 2, 1, 0};
@@ -6631,14 +6634,12 @@ class PinocchioVelocityIk {
           for (int arm = 0; arm < kArmCount; ++arm) {
             for (int joint = 0; joint < kJointsPerArm; ++joint) {
               const int index = armDecisionIndex(arm, joint);
-              const double requested = preparation_arm_position_requested_.at(
-                  static_cast<std::size_t>(arm * kJointsPerArm + joint));
               preparation_target(index) = std::clamp(
-                  requested, joint_safe_lower_(index), joint_safe_upper_(index));
+                  0.0, joint_safe_lower_(index), joint_safe_upper_(index));
             }
           }
           entry_preparation_position_ = preparation_target;
-          ROS_INFO("[VelocityIk] incremental entry moves arms to the launch ready pose");
+          ROS_INFO("[VelocityIk] incremental entry synchronizes both arms before moving to zero");
         } else if (preparation_active_) {
           ROS_INFO("[VelocityIk] reset PREPARE returns arms to the startup pose");
         }
@@ -6683,11 +6684,13 @@ class PinocchioVelocityIk {
       double lower_reference_error = 0.0;
       double lower_measured_error = 0.0;
       double selected_velocity = 0.0;
-      const auto set_preparation_joint = [&](int index, double limit) {
+      const auto set_preparation_joint = [&](int index, double limit,
+                                             double position, double feedforward = 0.0) {
         const double reference_error =
             preparation_target(index) - reference_q_(index);
         preparation_velocity(index) = std::clamp(
-            preparation_gain_ * reference_error, -limit, limit);
+            feedforward + preparation_gain_ * (position - reference_q_(index)),
+            -limit, limit);
         reference_position_error = std::max(
             reference_position_error, std::abs(reference_error));
         measured_position_error = std::max(
@@ -6705,14 +6708,27 @@ class PinocchioVelocityIk {
       for (int joint = 0; joint < kLowerBodyDof; ++joint) {
         const int index = lowerBodyDecisionIndex(joint);
         set_preparation_joint(index, std::min(velocity_limit_(index),
-                                             lower_joint_velocity_cap_.at(joint)));
+                                             lower_joint_velocity_cap_.at(joint)),
+                              preparation_target(index));
       }
       for (int arm = 0; arm < kArmCount; ++arm) {
         for (int joint = 0; joint < kJointsPerArm; ++joint) {
           const int index = armDecisionIndex(arm, joint);
+          double position = preparation_target(index);
+          double feedforward = 0.0;
+          if (incremental_entry_prepare_ && preparation_entry_elapsed_ < kEntryArmDuration) {
+            double& start = entry_arm_sync_position_[arm * kJointsPerArm + joint];
+            if (preparation_entry_elapsed_ < kEntryArmSyncDuration) {
+              start = measured_q(index);
+              position = start;
+            } else {
+              feedforward = (position - start) / (kEntryArmDuration - kEntryArmSyncDuration);
+              position = start + feedforward * (preparation_entry_elapsed_ - kEntryArmSyncDuration);
+            }
+          }
           set_preparation_joint(
               index, std::min(velocity_limit_(index),
-                              preparation_arm_velocity_limit_));
+                              preparation_arm_velocity_limit_), position, feedforward);
         }
       }
       if (contract_prepare && preparation_handoff_duration_ > 0.0 &&
@@ -6728,8 +6744,8 @@ class PinocchioVelocityIk {
         preparation_velocity =
             (1.0-blend)*(preparation_entry_dq_ + t*preparation_entry_ddq_) +
             blend*preparation_velocity;
-        preparation_entry_elapsed_ = t;
       }
+      preparation_entry_elapsed_ += cycle_dt;
       // Hard position/velocity/acceleration and stop authority retain priority
       // over the preferred handoff segment, including unavoidable braking.
       next_dq = calculateSupervisedVelocity(
@@ -6747,6 +6763,7 @@ class PinocchioVelocityIk {
                     std::max(preparation_initial_error_, 1.0e-6),
           0.0, 1.0);
       const bool settled =
+          (!incremental_entry_prepare_ || preparation_entry_elapsed_ >= kEntryArmDuration) &&
           lower_reference_error <= preparation_lower_position_tolerance_ &&
           lower_measured_error <= preparation_lower_measured_position_tolerance_ &&
           reference_position_error <= preparation_position_tolerance_ &&
@@ -8293,6 +8310,7 @@ class PinocchioVelocityIk {
   // lower-body posture, avoiding an unrelated move to every safe centre.
   DecisionVector startup_preparation_position_;
   DecisionVector entry_preparation_position_;
+  std::array<double, kDualArmDof> entry_arm_sync_position_{};
   bool incremental_entry_prepare_{false};
   std::vector<double> preparation_arm_position_requested_{
       0.2617993878, 0.0, 0.0, -1.20, 0.0, 0.0, 0.0,
