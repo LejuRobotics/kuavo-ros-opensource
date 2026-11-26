@@ -1302,6 +1302,10 @@ class PinocchioVelocityIk {
     pnh_.param("preparation_lower_measured_position_tolerance", preparation_lower_measured_position_tolerance_, 0.015);
     pnh_.param("preparation_velocity_tolerance",
                preparation_velocity_tolerance_, 0.030);
+    pnh_.param("preparation_measured_velocity_tolerance",
+               preparation_measured_velocity_tolerance_, 0.150);
+    pnh_.param("preparation_lower_measured_velocity_tolerance",
+               preparation_lower_measured_velocity_tolerance_, 0.100);
     pnh_.param("preparation_settle_cycles",
                preparation_settle_cycles_required_, 25);
     auto& startup = startup_readiness_.settings;
@@ -1826,6 +1830,18 @@ class PinocchioVelocityIk {
     }
     preparation_velocity_tolerance_ = std::max(
         1.0e-3, preparation_velocity_tolerance_);
+    if (!std::isfinite(preparation_measured_velocity_tolerance_)) {
+      preparation_measured_velocity_tolerance_ = 0.150;
+    }
+    if (!std::isfinite(preparation_lower_measured_velocity_tolerance_)) {
+      preparation_lower_measured_velocity_tolerance_ = 0.100;
+    }
+    // Raw joint_v is noisier than the stopped command. Never make a measured
+    // gate stricter than the reference stop threshold.
+    preparation_measured_velocity_tolerance_ = std::max(
+        preparation_velocity_tolerance_, preparation_measured_velocity_tolerance_);
+    preparation_lower_measured_velocity_tolerance_ = std::max(
+        preparation_velocity_tolerance_, preparation_lower_measured_velocity_tolerance_);
     preparation_settle_cycles_required_ = std::max(
         1, preparation_settle_cycles_required_);
     natural_hang_arm_threshold_ = std::max(
@@ -6683,7 +6699,8 @@ class PinocchioVelocityIk {
       double measured_position_error = 0.0;
       double lower_reference_error = 0.0;
       double lower_measured_error = 0.0;
-      double selected_velocity = 0.0;
+      double reference_velocity = 0.0;
+      bool measured_velocity_settled = true;
       const auto set_preparation_joint = [&](int index, double limit,
                                              double position, double feedforward = 0.0) {
         const double reference_error =
@@ -6701,9 +6718,19 @@ class PinocchioVelocityIk {
           lower_measured_error = std::max(lower_measured_error,
               std::abs(preparation_target(index) - measured_q(index)));
         }
-        selected_velocity = std::max(
-            selected_velocity, std::abs(reference_dq_(index)));
-        selected_velocity = std::max(selected_velocity, std::abs(measured_dq(index)));
+        reference_velocity = std::max(
+            reference_velocity, std::abs(reference_dq_(index)));
+        // Command speed keeps the tight stop threshold. Measured joint_v on a
+        // pose that has already been reached chatters above that threshold
+        // and must not reset the settle counter.
+        const double measured_velocity_limit = std::max(
+            preparation_velocity_tolerance_,
+            isDecisionGroup(index, DofGroup::kLowerBody)
+                ? preparation_lower_measured_velocity_tolerance_
+                : preparation_measured_velocity_tolerance_);
+        if (std::abs(measured_dq(index)) > measured_velocity_limit) {
+          measured_velocity_settled = false;
+        }
       };
       for (int joint = 0; joint < kLowerBodyDof; ++joint) {
         const int index = lowerBodyDecisionIndex(joint);
@@ -6769,7 +6796,8 @@ class PinocchioVelocityIk {
           reference_position_error <= preparation_position_tolerance_ &&
           measured_position_error <=
               preparation_measured_position_tolerance_ &&
-          selected_velocity <= preparation_velocity_tolerance_;
+          reference_velocity <= preparation_velocity_tolerance_ &&
+          measured_velocity_settled;
       preparation_settle_cycles_ = settled
           ? preparation_settle_cycles_ + 1
           : 0;
@@ -8549,6 +8577,8 @@ class PinocchioVelocityIk {
   double preparation_lower_position_tolerance_{0.008};
   double preparation_lower_measured_position_tolerance_{0.015};
   double preparation_velocity_tolerance_{0.030};
+  double preparation_measured_velocity_tolerance_{0.150};
+  double preparation_lower_measured_velocity_tolerance_{0.100};
   int preparation_settle_cycles_required_{25};
   int preparation_settle_cycles_{0};
   double cascade_lower_residual_start_{0.015};
