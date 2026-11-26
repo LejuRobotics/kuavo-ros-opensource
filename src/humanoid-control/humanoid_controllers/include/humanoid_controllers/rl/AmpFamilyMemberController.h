@@ -46,11 +46,15 @@ class AmpFamilyMemberController : public AmpWalkController {
   void setRobotActionStateEnabled(bool enabled) {
     if (gaitReceiver()) gaitReceiver()->setRobotActionStateEnabled(enabled);
   }
+  void handleGaitNameRequest(const std::string& gait_name) {
+    if (gaitReceiver()) gaitReceiver()->handleGaitNameRequest(gait_name);
+  }
 
  protected:
   AmpFamilyMemberController(const std::string& name, RLControllerType type,
     const std::string& config_file, ros::NodeHandle& nh,
     ocs2::humanoid::TopicLogger* logger = nullptr);
+  bool subscribeGaitNameTopic() const override { return false; }
   void processJointReference(Eigen::VectorXd& joint_reference) override;
 
  private:

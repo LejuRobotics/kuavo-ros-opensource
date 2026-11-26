@@ -101,6 +101,7 @@ namespace humanoid_controller
   protected:
     // Optional postprocessing before the existing PD and joint-command mapping.
     virtual void processJointReference(Eigen::VectorXd&) {}
+    virtual bool subscribeGaitNameTopic() const { return true; }
     ocs2::humanoid::RlGaitReceiver* gaitReceiver() { return gait_receiver_.get(); }
     const Eigen::Matrix<double, 4, 1>& commandVelocityLimits() const { return velocityLimits_; }
     ov::CompiledModel& policyModel() { return compiled_model_; }

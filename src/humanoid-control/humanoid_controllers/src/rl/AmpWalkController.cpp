@@ -83,7 +83,7 @@ namespace humanoid_controller
 
     // gait 指令来源：使用 RL gait receiver，等价于原来的 CommandData + joystick/cmd_vel
     initial_cmd_.cmdStance_ = 1;
-    gait_receiver_ = std::make_unique<RlGaitReceiver>(nh_, &initial_cmd_);
+    gait_receiver_ = std::make_unique<RlGaitReceiver>(nh_, &initial_cmd_, subscribeGaitNameTopic());
     gait_receiver_->setAmpHandController(name_ == "amp_hand_controller");
     if (is_amp_hand_controller_) {
       gait_receiver_->setAllowWalkingDuringAction(true);  // amp_hand 始终允许边走边做动作

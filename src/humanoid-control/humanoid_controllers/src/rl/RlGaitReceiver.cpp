@@ -19,7 +19,7 @@ namespace ocs2
 namespace humanoid
 {
 
-RlGaitReceiver::RlGaitReceiver(ros::NodeHandle& nh, CommandDataRL* initialCommand)
+RlGaitReceiver::RlGaitReceiver(ros::NodeHandle& nh, CommandDataRL* initialCommand, bool subscribe_gait_name)
   : nh_(nh)
   , enabled_(true)
   , reuse_walk_command_in_stance_(false)
@@ -107,9 +107,12 @@ RlGaitReceiver::RlGaitReceiver(ros::NodeHandle& nh, CommandDataRL* initialComman
   cmd_pose_sub_ = nh_.subscribe<geometry_msgs::Twist>(cmd_pose_topic_, 10,
     &RlGaitReceiver::cmdPoseCallback, this);
   
-  // Subscribe to gait name request topic
-  gait_name_sub_ = nh_.subscribe<std_msgs::String>("/humanoid_mpc_gait_name_request", 10,
-    &RlGaitReceiver::gaitNameCallback, this);
+  // Subscribe to gait name request topic (AMP family members delegate this to the family controller)
+  if (subscribe_gait_name)
+  {
+    gait_name_sub_ = nh_.subscribe<std_msgs::String>("/humanoid_mpc_gait_name_request", 10,
+      &RlGaitReceiver::gaitNameCallback, this);
+  }
 
   robot_action_state_sub_ = nh_.subscribe<humanoid_plan_arm_trajectory::RobotActionState>(
     "/robot_action_state", 10, &RlGaitReceiver::robotActionStateCallback, this);
@@ -176,6 +179,36 @@ void RlGaitReceiver::resetCommandState(bool stance_mode)
   trot_latched_ = false;
   last_velocity_update_time_ = ros::Time::now();
   stopInPlaceStepping();
+}
+
+void RlGaitReceiver::applyWalkingGaitLocked(const std::string& gait_name)
+{
+  pending_gait_name_.clear();
+  currentCommand_.cmdStance_ = 0.0;
+  stance_dwell_gate_.reset();
+  if (gait_name == "trot")
+  {
+    trot_latched_ = true;
+  }
+  smart_stop_enabled_ = false;
+}
+
+void RlGaitReceiver::applyStanceLocked()
+{
+  if (command_filter_) command_filter_->reset();
+  pending_gait_name_.clear();
+  latest_gait_name_ = "stance";
+  currentCommand_.setzero();
+  currentCommand_.cmdStance_ = 1.0;
+  stance_dwell_gate_.reset();
+  trot_latched_ = false;
+  latest_cmd_vel_ = geometry_msgs::Twist();
+  smoothed_cmd_vel_ = geometry_msgs::Twist();
+  previous_cmd_vel_ = geometry_msgs::Twist();
+  smoothed_cmd_pose_ = geometry_msgs::Twist();
+  previous_cmd_pose_ = geometry_msgs::Twist();
+  stopInPlaceStepping();
+  smart_stop_enabled_ = true;
 }
 
 void RlGaitReceiver::overrideCommandState(const CommandDataRL& command)
@@ -380,13 +413,7 @@ void RlGaitReceiver::update(const ros::Time& time, const vector_t& torsostate, c
   if (!pending_gait_name_.empty() && !command_blocked)
   {
     const std::string gait_name = pending_gait_name_;
-    pending_gait_name_.clear();
-    currentCommand_.cmdStance_ = 0.0;
-    if (gait_name == "trot")
-    {
-      trot_latched_ = true;
-    }
-    smart_stop_enabled_ = false;
+    applyWalkingGaitLocked(gait_name);
     ROS_INFO_STREAM("[RlGaitReceiver] Applied pending walking gait after controller switch: " << gait_name);
   }
 
@@ -830,7 +857,11 @@ bool RlGaitReceiver::isRobotActionActiveLocked(const ros::Time& now) const
 
 void RlGaitReceiver::gaitNameCallback(const std_msgs::String::ConstPtr& msg)
 {
-  const std::string& gait_name = msg->data;
+  handleGaitNameRequest(msg->data);
+}
+
+void RlGaitReceiver::handleGaitNameRequest(const std::string& gait_name)
+{
   ROS_INFO_STREAM("[RlGaitReceiver] Received gait name request: " << gait_name);
 
   std::function<bool()> command_buffer_callback;
@@ -845,19 +876,7 @@ void RlGaitReceiver::gaitNameCallback(const std_msgs::String::ConstPtr& msg)
   
   // Manually switch cmdStance_ state based on gait name
   if (gait_name == "stance") {
-    if (command_filter_) command_filter_->reset();
-    pending_gait_name_.clear();
-    currentCommand_.setzero();
-    currentCommand_.cmdStance_ = 1.0;
-    stance_dwell_gate_.reset();
-    trot_latched_ = false;
-    latest_cmd_vel_ = geometry_msgs::Twist();
-    smoothed_cmd_vel_ = geometry_msgs::Twist();
-    previous_cmd_vel_ = geometry_msgs::Twist();
-    smoothed_cmd_pose_ = geometry_msgs::Twist();
-    previous_cmd_pose_ = geometry_msgs::Twist();
-    stopInPlaceStepping();
-    smart_stop_enabled_ = true;
+    applyStanceLocked();
     ROS_INFO("[RlGaitReceiver] Manually switched to stance mode");
   } else if (gait_name == "walk" || gait_name == "trot") {
     // ignore_twist_cmd_（纯站立控制器）：忽略行走步态请求，保持站立，
@@ -873,13 +892,7 @@ void RlGaitReceiver::gaitNameCallback(const std_msgs::String::ConstPtr& msg)
       ROS_INFO_STREAM("[RlGaitReceiver] Delay walking gait until walking controller is active: " << gait_name);
       return;
     }
-    currentCommand_.cmdStance_ = 0.0;
-    stance_dwell_gate_.reset();
-    if (gait_name == "trot")
-    {
-      trot_latched_ = true;
-    }
-    smart_stop_enabled_ = false;
+    applyWalkingGaitLocked(gait_name);
     ROS_INFO_STREAM("[RlGaitReceiver] Manually switched to walking mode for gait: " << gait_name);
   } else {
     ROS_WARN("[RlGaitReceiver] Unknown gait name: %s, keeping current stance state", gait_name.c_str());
