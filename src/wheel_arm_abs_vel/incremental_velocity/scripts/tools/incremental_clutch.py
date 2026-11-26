@@ -30,6 +30,7 @@ class HandClutch:
         self.elbow_entry = 0.
         self.regrip_input = None
         self.rotation_only_input = None
+        self.regrip_elbow_gate = None
         self.held_edge = None
         self.frozen_base = None
         self.frozen_chest = None
@@ -54,11 +55,18 @@ class HandClutch:
         return (np.linalg.norm(hand - old_hand) <= self.rotation_only_regrip_distance
                 and np.linalg.norm(log_so3(rotation @ old_rotation.T)) >= self.rotation_only_angle)
 
-    def rotation_only_input_moved(self, hand, elbow):
-        old_hand, old_elbow = self.rotation_only_input
+    def regrip_position_moved(self, anchor, hand, elbow):
+        old_hand, old_elbow = anchor
         return (np.linalg.norm(hand - old_hand) > self.rotation_only_distance
                 or (elbow is not None and old_elbow is not None
                     and np.linalg.norm(elbow - old_elbow) > self.rotation_only_distance))
+
+    def defer_elbow_on_regrip(self, elbow):
+        if self.incremental_rotation or self.regrip_input is None:
+            return False
+        old_elbow = self.regrip_input[2]
+        return (elbow is not None and old_elbow is not None
+                and np.linalg.norm(elbow - old_elbow) <= self.rotation_only_distance)
 
     def sample(self, key, edge, engaged, hand, rotation, velocity, omega, measured, shoulder, stamp=None):
         if key != self.key:
