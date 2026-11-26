@@ -1789,7 +1789,7 @@ Quest与Pico使用不同的连接方式。第一份真机和仿真Quest命令都
 | 仿真dynamics_backend | rnea | 仅仿真控制器追加dynamics_backend:=wbc等已验证选项；输入入口不传此参数 |
 | base_locked | true，底盘锁定 | 仅真机控制器末尾追加base_locked:=false；当前仿真顶层入口未声明该参数 |
 | ros_ip | 真机默认192.168.26.1 | 控制器追加ros_ip:=本机实际底盘通信地址 |
-| ee_type | auto，读取机型JSON | 输入入口追加ee_type:=实际末端类型，通常不覆盖 |
+| ee_type | auto，读取机型JSON | 在主控启动命令追加 `ee_type:=实际末端类型`。Quest/Pico 可沿用 auto 或传同一类型 |
 | enable_head_control | false | 由控制器的 head_control_node 负责，默认 vr_follow；此兼容参数不重新启用接收器头控 |
 | enable_terminal_start | false；默认第一个控制器终端按 o | 仅需输入端备用监听时追加 enable_terminal_start:=true |
 | Quest ip_address | 源码空值会自动发现，本文不采用 | 必须在Quest输入命令填写ip_address:=头显IPv4地址 |

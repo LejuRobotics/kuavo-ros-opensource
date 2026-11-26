@@ -214,6 +214,7 @@ namespace ocs2
             
             // 添加 enable_wbc_arm_trajectory_control 服务客户端
             enable_wbc_arm_trajectory_control_client_ = nodeHandle_.serviceClient<kuavo_msgs::changeArmCtrlMode>("/enable_wbc_arm_trajectory_control");
+            reset_arm_traj_to_stand_client_ = nodeHandle_.serviceClient<std_srvs::Trigger>("/humanoid_controller/reset_arm_traj_to_stand");
             
             // VR腰部控制动态Q矩阵服务客户端
             vr_waist_control_service_client_ = nodeHandle_.serviceClient<std_srvs::SetBool>("/humanoid/mpc/vr_waist_control");
@@ -450,6 +451,24 @@ namespace ocs2
             else
             {
                 ROS_ERROR("Failed to call EnableWbcArmTrajectorySrv");
+            }
+        }
+
+        void callResetArmTrajToStandSrv()
+        {
+            if (!reset_arm_traj_to_stand_client_.waitForExistence(ros::Duration(0.5)))
+            {
+                ROS_WARN("reset_arm_traj_to_stand service not available, skipping call");
+                return;
+            }
+            std_srvs::Trigger srv;
+            if (reset_arm_traj_to_stand_client_.call(srv) && srv.response.success)
+            {
+                ROS_INFO("ResetArmTrajToStandSrv call successful: %s", srv.response.message.c_str());
+            }
+            else
+            {
+                ROS_WARN("Failed to replace arm_joint_trajectory_.pos with stand pose");
             }
         }
 
@@ -804,6 +823,9 @@ namespace ocs2
             // G12 动作在 Phase2 入口用到过期的 /kuavo_arm_traj（kuavodevlab#5064）。
             // 必须放在「腰部是否曾使能」判断之外：#5064 复现时腰部控制已经是关闭的。
             callEnableWbcArmTrajectorySrv(0);
+            // 低时延最后一帧还留在 humanoidController 的 arm_joint_trajectory_.pos。
+            // 下次打开轨迹控制时，10Hz 滤波会先朝这帧抬一下。退出 VR 后换成站立姿态。
+            callResetArmTrajToStandSrv();
 
             res.success = true;
             res.message = was_torso_control_enabled ? "Torso control disabled (VR node shutdown reset)"
@@ -2181,6 +2203,7 @@ namespace ocs2
         ros::ServiceClient get_arm_mode_service_client_;
 
         ros::ServiceClient enable_wbc_arm_trajectory_control_client_;
+        ros::ServiceClient reset_arm_traj_to_stand_client_;
         ros::ServiceClient vr_waist_control_service_client_;  // VR腰部控制动态Q矩阵服务客户端
         ros::ServiceClient auto_gait_mode_service_client_;    // GaitReceiver自动步态模式服务客户端
         ros::ServiceClient control_mode_client_;              // MPC控制模式切换服务客户端

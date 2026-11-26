@@ -143,6 +143,19 @@ class LaunchModelTest(unittest.TestCase):
                 self.assertEqual(cfg.params['/absolute_velocity_ik/use_controller_startup_arm_pose'].value,
                                  enabled)
 
+    def test_controller_end_effector_override_reaches_real_and_sim(self):
+        import json
+        for entry, real, extra in [('load_kuavo_real_velocity_ik.launch', True, []),
+                                   ('load_kuavo_mujoco_velocity_ik.launch', False, []),
+                                   ('control.launch', True, ['controller_type:=wheel_arm_abs_vel', 'real:=true']),
+                                   ('control.launch', False, ['controller_type:=wheel_arm_abs_vel', 'real:=false'])]:
+            for requested, expected in [('auto', 'heiman'), ('lejuclaw', 'lejuclaw')]:
+                with self.subTest(entry=entry, requested=requested):
+                    cfg = self.load(entry, extra + ['robot_version:=410062', 'ee_type:=' + requested])
+                    contract = json.loads(cfg.params['/absolute_velocity_ik/end_effector_contract'].value)
+                    self.assertEqual(contract['types'], [expected, expected])
+                    self.assertEqual(contract['real'], real)
+
     def test_private_sim_motor_servo_and_rollback(self):
         cfg = self.load("load_kuavo_mujoco_velocity_ik.launch", ["robot_version:=62"])
         self.assertEqual(cfg.params["/dynamics_backend"].value, "rnea")
@@ -182,9 +195,6 @@ class LaunchModelTest(unittest.TestCase):
                             command = shlex.split(bridge[0].args)
                             command.remove("--bridge")  # Read-only resolver: never launch a bridge in a test.
                             self.assertIn('--machine-mode=auto', command)
-                            # This case checks the model-config fallback, without
-                            # a ROS master. Machine inventory has its own suite.
-                            command[command.index('--machine-mode=auto')] = '--machine-mode=false'
                             result = subprocess.run(["/usr/bin/python3",
                                 str(PACKAGE/"scripts/absolute_end_effector.py")] + command,
                                 capture_output=True, text=True, check=True)

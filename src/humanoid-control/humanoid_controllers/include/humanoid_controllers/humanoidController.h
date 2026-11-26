@@ -445,6 +445,7 @@ namespace humanoid_controller
     bool tryApplyPendingExternalArmControllerMode();
     bool shouldBlockWalkingCommandForExternalArmTarget() const;
     bool enableArmTrajectoryControlCallback(kuavo_msgs::changeArmCtrlMode::Request &req, kuavo_msgs::changeArmCtrlMode::Response &res);
+    bool resetArmTrajToStandCallback(std_srvs::Trigger::Request &req, std_srvs::Trigger::Response &res);
     bool enableArmTrajInterpCallback(std_srvs::SetBool::Request& req, std_srvs::SetBool::Response& res);
     bool applyArmTrajInterpolator(const ros::Time& time, double actual_dt, vector_t& qOut, vector_t& vOut);
     void resetArmTrajInterpolator();
@@ -714,6 +715,7 @@ namespace humanoid_controller
     ros::Subscriber enable_wbc_sub_;
 
     ros::ServiceServer enableArmCtrlSrv_;
+    ros::ServiceServer resetArmTrajToStandSrv_;
     ros::ServiceServer enableArmTrajInterpSrv_;
     ros::ServiceServer enableMmArmCtrlSrv_;
     ros::ServiceServer getMmArmCtrlSrv_;
@@ -917,6 +919,9 @@ namespace humanoid_controller
 
 
     bool use_ros_arm_joint_trajectory_ = false;
+    // VR 节点退出后为 true：丢掉迟到的遥操帧，直到下一次打开手臂轨迹控制。
+    bool arm_traj_hold_stand_{false};
+    std::mutex arm_joint_trajectory_mutex_;
     bool use_mm_arm_joint_trajectory_ = false;
     int ultra_fast_mode_;
     bool last_ultra_fast_mode_ = false;

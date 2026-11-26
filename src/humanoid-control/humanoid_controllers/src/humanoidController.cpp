@@ -923,10 +923,15 @@ namespace humanoid_controller
           }
           if (is_rl_controller_ == false)
           {
-            for (int i = 0; i < count; ++i) {
-              arm_joint_trajectory_.pos[i] = pos[i];
-              arm_joint_trajectory_.vel[i] = (vel != nullptr) ? vel[i] : 0.0;
-              arm_joint_trajectory_.tau[i] = (tau != nullptr) ? tau[i] : 0.0;
+            std::lock_guard<std::mutex> lock(arm_joint_trajectory_mutex_);
+            // 退出 VR 后保持站立姿态，避免节点退出前队列里的遥操帧把缓存写回去。
+            if (!arm_traj_hold_stand_)
+            {
+              for (int i = 0; i < count; ++i) {
+                arm_joint_trajectory_.pos[i] = pos[i];
+                arm_joint_trajectory_.vel[i] = (vel != nullptr) ? vel[i] : 0.0;
+                arm_joint_trajectory_.tau[i] = (tau != nullptr) ? tau[i] : 0.0;
+              }
             }
           }
           // 轨迹数据不代表新的 mode2 意图。自动切换由显式手臂模式请求触发，
@@ -1058,6 +1063,7 @@ namespace humanoid_controller
       );
       armJointSynchronizationSrv_ = controllerNh_.advertiseService("/arm_joint_synchronization", &humanoidController::armJointSynchronizationCallback, this); 
       enableArmCtrlSrv_ = controllerNh_.advertiseService("/enable_wbc_arm_trajectory_control", &humanoidController::enableArmTrajectoryControlCallback, this);
+      resetArmTrajToStandSrv_ = controllerNh_.advertiseService("/humanoid_controller/reset_arm_traj_to_stand", &humanoidController::resetArmTrajToStandCallback, this);
       enableArmTrajInterpSrv_ = controllerNh_.advertiseService("/enable_arm_traj_interpolator", &humanoidController::enableArmTrajInterpCallback, this);
       enableMmArmCtrlSrv_ = controllerNh_.advertiseService("/enable_mm_wbc_arm_trajectory_control", &humanoidController::enableMmArmTrajectoryControlCallback, this);
       getMmArmCtrlSrv_ = controllerNh_.advertiseService("/get_mm_wbc_arm_trajectory_control", &humanoidController::getMmArmCtrlCallback, this);
@@ -2739,8 +2745,41 @@ void humanoidController::sensorsDataCallback(const kuavo_msgs::sensorsData::Cons
     return true;
   }
 
+  bool humanoidController::resetArmTrajToStandCallback(std_srvs::Trigger::Request &req, std_srvs::Trigger::Response &res)
+  {
+      (void)req;
+      std::lock_guard<std::mutex> lock(arm_joint_trajectory_mutex_);
+      if (defalutArmPosMPC_.size() != static_cast<int>(armNumReal_) ||
+          arm_joint_trajectory_.pos.size() != defalutArmPosMPC_.size())
+      {
+        res.success = false;
+        res.message = "stand pose size does not match arm_joint_trajectory_";
+        ROS_WARN("[ArmControl] reset_arm_traj_to_stand failed: stand=%ld traj=%ld arm=%zu",
+                 static_cast<long>(defalutArmPosMPC_.size()),
+                 static_cast<long>(arm_joint_trajectory_.pos.size()),
+                 armNumReal_);
+        return true;
+      }
+
+      arm_traj_hold_stand_ = true;
+      arm_joint_trajectory_.pos = defalutArmPosMPC_;
+      arm_joint_trajectory_.vel.setZero();
+      arm_joint_trajectory_.tau.setZero();
+      res.success = true;
+      res.message = "arm_joint_trajectory_.pos replaced with stand pose";
+      ROS_INFO("[ArmControl] Replaced arm_joint_trajectory_.pos with stand pose");
+      return true;
+  }
+
   bool humanoidController::enableArmTrajectoryControlCallback(kuavo_msgs::changeArmCtrlMode::Request &req, kuavo_msgs::changeArmCtrlMode::Response &res)
   {
+      // 再次打开轨迹控制时恢复接收。退出 VR 到下一次打开之间，缓存保持站立姿态。
+      if (req.control_mode != 0)
+      {
+        std::lock_guard<std::mutex> lock(arm_joint_trajectory_mutex_);
+        arm_traj_hold_stand_ = false;
+      }
+
       constexpr int kExternalArmControlMode = 2;
       if (controller_manager_ &&
           req.control_mode == kExternalArmControlMode)

@@ -3,7 +3,6 @@
 import argparse
 import json
 import os
-import pwd
 from pathlib import Path
 import sys
 
@@ -29,64 +28,7 @@ def resolve(config, override='auto'):
     return left
 
 
-# CAN SDK classes describe installed hardware independently of ROBOT_VERSION.
-CAN_TYPES = {'lejuclaw':'lejuclaw', 'revo1_hand':'qiangnao', 'revo2_hand':'revo2'}
-
-
-def machine_config_directory():
-    explicit = os.environ.get('KUAVO_MACHINE_CONFIG_DIR')
-    if explicit:
-        return Path(explicit)
-    home = Path.home()
-    if os.geteuid() == 0 and os.environ.get('SUDO_USER') not in (None, '', 'root'):
-        home = Path(pwd.getpwnam(os.environ['SUDO_USER']).pw_dir)
-    return home/'.config/lejuconfig'
-
-
-def machine_pair(directory):
-    """Read the SDK's device inventory; never open CAN/serial or send a command."""
-    import yaml
-    directory = Path(directory)
-    files = [directory/'canbus_device_config.yaml', directory/'canbus_device_cofig.yaml']
-    path = next((p for p in files if p.exists()), None)
-    if path is None:
-        return None, None
-    data = yaml.safe_load(path.read_text())
-    if not isinstance(data, dict):
-        raise ValueError('CAN device inventory must be a mapping: ' + str(path))
-    found, active, identities = [], [], set()
-    for key, entries in data.items():
-        if not key.endswith('_devices'):
-            continue
-        if not isinstance(entries, list):
-            raise ValueError('invalid CAN device list: ' + key)
-        for device in entries:
-            if not isinstance(device, dict):
-                raise ValueError('invalid CAN device entry: ' + key)
-            kind = device.get('class')
-            if kind not in CAN_TYPES:
-                continue
-            found.append(kind)
-            ignored = device.get('ignore', False)
-            if not isinstance(ignored, bool):
-                raise ValueError('CAN ignore must be a boolean')
-            if ignored:
-                continue
-            identity = (key, device.get('device_id'))
-            if not isinstance(identity[1], int) or isinstance(identity[1], bool) or identity in identities:
-                raise ValueError('missing or duplicate CAN end-effector identity')
-            identities.add(identity)
-            active.append(CAN_TYPES[kind])
-    if not found:
-        return None, None  # E.g. serial SG100: retain the model's explicit type.
-    if not active:
-        return None, None  # Ignored CAN devices do not identify serial/non-CAN hardware.
-    if len(active) != 2 or active[0] != active[1]:
-        raise ValueError('CAN inventory requires two matching active end effectors; got %r' % active)
-    return active, str(path)
-
-
-def machine_mode(value, inspect_inventory=True):
+def machine_mode(value):
     if str(value).lower() in ('true','1'): return True
     if str(value).lower() in ('false','0'): return False
     if value != 'auto': raise ValueError('machine mode must be auto/true/false')
@@ -103,23 +45,7 @@ def machine_mode(value, inspect_inventory=True):
         if code == 1 and isinstance(real, bool): return real
     except (OSError, xmlrpc.client.Error):
         pass
-    if not inspect_inventory:
-        return False  # Explicit selection does not depend on CAN inventory.
-    pair, _ = machine_pair(machine_config_directory())
-    if pair is not None:
-        raise ValueError('controller /real is unavailable; start the controller first or explicitly select machine_end_effector:=true/false')
     return False
-
-
-def select(config, override='auto', use_machine=False, directory=None):
-    if override not in ('','auto'):
-        kind = checked(override)
-        return [kind,kind], 'explicit ee_type'
-    if use_machine:
-        pair, source = machine_pair(machine_config_directory() if directory is None else directory)
-        if pair is not None: return pair, source
-    kind = resolve(config)
-    return [kind,kind], 'model kuavo.json'
 
 
 def validate_contract(text, version, real, override='auto'):
@@ -158,9 +84,7 @@ def resolve_runtime(config, override='auto'):
     if contract is not None:
         return validate_contract(contract, rospy.get_param('/robot_version'),
                                  rospy.get_param('/real', False), override)
-    pair, source = select(config, override, use_machine=rospy.get_param('/real', False) is True)
-    rospy.loginfo('[EndEffectorSelection] types=%s source=%s', pair, source)
-    return pair[0]
+    return resolve(config, override)
 
 
 def main(argv=None):
@@ -174,14 +98,16 @@ def main(argv=None):
     if any(':=' not in arg for arg in remaps):
         parser.error('only ROS remappings may follow resolver arguments')
     try:
-        config = json.loads(Path(args.config).read_text())
         contracted = bridge_contract(args.ee_type) if args.bridge else None
         if contracted is not None:
-            kind = contracted; pair = [kind, kind]; source = 'controller contract'; real = True
+            kind = contracted
+            source = 'controller contract'
         else:
-            real = machine_mode(args.machine_mode, inspect_inventory=args.ee_type in ('', 'auto'))
-            pair, source = select(config, args.ee_type, use_machine=real)
-            kind = pair[0]
+            config = json.loads(Path(args.config).read_text()) if args.ee_type in ('', 'auto') else {}
+            kind = resolve(config, args.ee_type)
+            source = 'model kuavo.json' if args.ee_type in ('', 'auto') else 'explicit ee_type'
+        if args.contract_version is not None:
+            real = machine_mode(args.machine_mode)
     except (OSError, ValueError, TypeError, AttributeError) as exc:
         print('[absolute end effector] ERROR: %s' % exc, file=sys.stderr, flush=True)
         return 2
@@ -190,7 +116,7 @@ def main(argv=None):
           file=sys.stderr, flush=True)
     if args.contract_version is not None:
         if args.contract_version <= 0: raise ValueError('positive robot version required')
-        sys.stdout.write(json.dumps(dict(robot_version=args.contract_version, types=pair, source=source, real=real)))
+        sys.stdout.write(json.dumps(dict(robot_version=args.contract_version, types=[kind, kind], source=source, real=real)))
         return 0
     if args.bridge:
         if kind == 'heiman':

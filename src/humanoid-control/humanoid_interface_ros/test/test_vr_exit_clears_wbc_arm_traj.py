@@ -121,6 +121,29 @@ class VrExitClearsWbcArmTrajTest(unittest.TestCase):
             "resetVrTorsoStateCallback must call callEnableWbcArmTrajectorySrv(0) "
             "on every VR shutdown reset, including when torso control is already off",
         )
+        clear_call = after_if.find("callEnableWbcArmTrajectorySrv(0)")
+        stand_call = after_if.find("callResetArmTrajToStandSrv()")
+        self.assertGreater(
+            stand_call,
+            clear_call,
+            "VR shutdown must replace arm_joint_trajectory_.pos with the stand pose "
+            "after clearing the low-latency flag",
+        )
+
+    def test_controller_resets_cached_traj_to_stand_pose(self):
+        controller = (
+            Path(__file__).resolve().parents[2]
+            / "humanoid_controllers/src/humanoidController.cpp"
+        )
+        source = controller.read_text(encoding="utf-8")
+        start = source.find("bool humanoidController::resetArmTrajToStandCallback")
+        self.assertGreater(start, 0)
+        callback = source[start : start + 1200]
+        self.assertIn("arm_joint_trajectory_.pos = defalutArmPosMPC_", callback)
+        self.assertIn("arm_traj_hold_stand_ = true", callback)
+        receiver_at = source.find("arm_traj_receiver_.init")
+        receiver = source[receiver_at : receiver_at + 2500]
+        self.assertIn("if (!arm_traj_hold_stand_)", receiver)
 
     def test_reset_callback_still_clears_torso_state(self):
         self.assertIn("torso_control_enabled_ = false", self.callback)
