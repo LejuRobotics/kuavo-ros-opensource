@@ -1087,36 +1087,31 @@ void WheelQuest3IkIncrementalROS::initializeFilter(std::unique_ptr<ocs2::mobile_
   }
 }
 
-void WheelQuest3IkIncrementalROS::daggerWaistConfigCallback(const std_msgs::String::ConstPtr& msg) {
+void WheelQuest3IkIncrementalROS::daggerWaistConfigCallback(
+    const kuavo_msgs::DaggerWaistConfig::ConstPtr& msg) {
   try {
-    const auto packet = nlohmann::json::parse(msg->data);
-    DaggerWaistConfig config;
-    config.session = packet.at("session").get<std::string>();
-    config.whichArm = packet.at("which_arm").get<std::string>();
-    config.maxSpeed = packet.at("max_speed").get<double>();
-    config.actionTimeout = packet.at("action_timeout").get<double>();
-    config.signalTimeout = packet.at("signal_timeout").get<double>();
-    if (packet.at("schema_version") != 1 || config.session.empty() ||
+    DaggerWaistConfigState config;
+    config.session = msg->session;
+    config.whichArm = msg->which_arm;
+    config.maxSpeed = msg->max_speed;
+    config.actionTimeout = msg->action_timeout;
+    config.signalTimeout = msg->signal_timeout;
+    if (msg->schema_version != 1 || config.session.empty() || msg->header.stamp.isZero() ||
         (config.whichArm != "left" && config.whichArm != "right" && config.whichArm != "both") ||
         !std::isfinite(config.maxSpeed) || config.maxSpeed <= 0. ||
         !std::isfinite(config.actionTimeout) || config.actionTimeout <= 0. ||
         !std::isfinite(config.signalTimeout) || config.signalTimeout <= 0.) {
       throw std::invalid_argument("invalid waist configuration");
     }
-    for (const auto* key : {"lower", "upper", "lock_mask", "lock_position"}) {
-      if (!packet.at(key).is_array() || packet.at(key).size() != 4) {
-        throw std::invalid_argument("waist configuration requires four joints");
-      }
-    }
     for (int i = 0; i < 4; ++i) {
-      config.lower[i] = packet.at("lower").at(i).get<double>();
-      config.upper[i] = packet.at("upper").at(i).get<double>();
-      const double locked = packet.at("lock_position").at(i).get<double>();
+      config.lower[i] = msg->lower[i];
+      config.upper[i] = msg->upper[i];
+      const double locked = msg->lock_position[i];
       if (!std::isfinite(config.lower[i]) || !std::isfinite(config.upper[i]) ||
           config.lower[i] >= config.upper[i] || !std::isfinite(locked)) {
         throw std::invalid_argument("invalid waist limits/lock position");
       }
-      if (packet.at("lock_mask").at(i).get<bool>()) {
+      if (msg->lock_mask[i]) {
         if (locked < config.lower[i] || locked > config.upper[i]) {
           throw std::invalid_argument("locked waist position is outside limits");
         }
@@ -1127,9 +1122,9 @@ void WheelQuest3IkIncrementalROS::daggerWaistConfigCallback(const std_msgs::Stri
     if (config.session == daggerWaistConfig_.session) return;
     daggerWaistConfig_ = config;
     ++daggerWaistInputEpoch_;
-    daggerWaistCandidate_["config_session"] = config.session;
-    daggerWaistCandidate_["ready"] = false;
-    daggerWaistCandidate_["requested"] = false;
+    daggerWaistCandidate_.config_session = config.session;
+    daggerWaistCandidate_.ready = false;
+    daggerWaistCandidate_.requested = false;
     ROS_INFO("[WheelQuest3IkIncrementalROS] DAgger waist configuration: %s, max_speed=%.3f rad/s",
              config.whichArm.c_str(), config.maxSpeed);
   } catch (const std::exception& error) {
@@ -1163,19 +1158,22 @@ void WheelQuest3IkIncrementalROS::daggerBodyPoseCallback(const geometry_msgs::Po
   if (msg->header.stamp > daggerBodyPose_.header.stamp) daggerBodyPose_ = *msg;
 }
 
-nlohmann::json WheelQuest3IkIncrementalROS::daggerWaistMetadata() {
+kuavo_msgs::DaggerWaistCandidate WheelQuest3IkIncrementalROS::daggerWaistMetadata() {
   std::lock_guard<std::mutex> lock(daggerWaistMutex_);
   auto result = daggerWaistCandidate_;
   const auto now = ros::Time::now();
-  result["requested"] = daggerWaistRequestedLocked(now);
-  const double age = now.toSec() - result.at("stamp_ns").get<uint64_t>() / 1e9;
-  if (!result.at("requested").get<bool>() || daggerWaistInputEpoch_ != daggerWaistEpoch_ ||
-      age < -0.05 || age > daggerWaistConfig_.actionTimeout) result["ready"] = false;
+  result.requested = daggerWaistRequestedLocked(now);
+  const double age = (now - result.source_stamp).toSec();
+  if (!result.requested || result.source_stamp.isZero() ||
+      daggerWaistInputEpoch_ != daggerWaistEpoch_ || age < -0.05 ||
+      age > daggerWaistConfig_.actionTimeout) {
+    result.ready = false;
+  }
   return result;
 }
 
 void WheelQuest3IkIncrementalROS::updateDaggerWaistCandidate() {
-  DaggerWaistConfig config;
+  DaggerWaistConfigState config;
   geometry_msgs::PoseStamped body;
   uint64_t epoch;
   bool requested;
@@ -1261,10 +1259,13 @@ void WheelQuest3IkIncrementalROS::updateDaggerWaistCandidate() {
     std::lock_guard<std::mutex> lock(daggerWaistMutex_);
     if (epoch != daggerWaistInputEpoch_) return;  // Grip/config changed during IK.
     daggerWaistEpoch_ = epoch;
-    daggerWaistCandidate_ = {{"config_session", config.session}, {"requested", requested},
-        {"ready", ready}, {"generation", daggerWaistGeneration_},
-        {"stamp_ns", ready ? std::min(body.header.stamp, sensorStamp).toNSec() : uint64_t(0)},
-        {"position", std::vector<double>(daggerWaistTarget_.data(), daggerWaistTarget_.data() + 4)}};
+    daggerWaistCandidate_.config_session = config.session;
+    daggerWaistCandidate_.requested = requested;
+    daggerWaistCandidate_.ready = ready;
+    daggerWaistCandidate_.generation = daggerWaistGeneration_;
+    daggerWaistCandidate_.source_stamp =
+        ready ? std::min(body.header.stamp, sensorStamp) : ros::Time(0);
+    std::copy_n(daggerWaistTarget_.data(), 4, daggerWaistCandidate_.position.begin());
   }
 }
 
@@ -2525,7 +2526,9 @@ void WheelQuest3IkIncrementalROS::smoothPublishedArmCommand(const Eigen::VectorX
   vOut = v;
 }
 
-void WheelQuest3IkIncrementalROS::publishKuavoArmTrajJointStates(sensor_msgs::JointState armJintStateMsg, nlohmann::json candidateMetadata) {
+void WheelQuest3IkIncrementalROS::publishKuavoArmTrajJointStates(
+    sensor_msgs::JointState armJintStateMsg,
+    std::optional<DaggerCandidateStatus> candidateStatus) {
   if (armJintStateMsg.header.stamp.isZero()) {
     armJintStateMsg.header.stamp = ros::Time::now();
   }
@@ -2541,16 +2544,22 @@ void WheelQuest3IkIncrementalROS::publishKuavoArmTrajJointStates(sensor_msgs::Jo
   incrementalArmTrajRadRecordPublisher_.publish(armJintStateMsgRad);
 
   if (daggerCandidateOnly_) {
-    if (!candidateMetadata.is_null()) {
-      candidateMetadata["schema_version"] = 1;
-      candidateMetadata["session"] = candidateSessionId_;
-      candidateMetadata["sequence"] = ++candidateSequence_;
-      candidateMetadata["stamp_ns"] = armJintStateMsgRad.header.stamp.toNSec();
-      candidateMetadata["position"] = armJintStateMsgRad.position;
-      candidateMetadata["velocity"] = armJintStateMsgRad.velocity;
-      candidateMetadata["waist"] = daggerWaistMetadata();
-      std_msgs::String packet;
-      packet.data = candidateMetadata.dump();
+    if (candidateStatus.has_value()) {
+      kuavo_msgs::DaggerArmCandidate packet;
+      packet.header = armJintStateMsgRad.header;
+      packet.schema_version = 1;
+      packet.session = candidateSessionId_;
+      packet.sequence = ++candidateSequence_;
+      std::copy_n(armJintStateMsgRad.position.begin(), 14, packet.position.begin());
+      std::copy_n(armJintStateMsgRad.velocity.begin(), 14, packet.velocity.begin());
+      packet.left_requested = candidateStatus->leftRequested;
+      packet.right_requested = candidateStatus->rightRequested;
+      packet.left_ready = candidateStatus->leftReady;
+      packet.right_ready = candidateStatus->rightReady;
+      packet.left_generation = candidateStatus->leftGeneration;
+      packet.right_generation = candidateStatus->rightGeneration;
+      packet.waist_valid = drakeJointStateSize_ == 18;
+      packet.waist = daggerWaistMetadata();
       daggerArmCandidatePublisher_.publish(packet);
     }
   } else {
@@ -2577,7 +2586,7 @@ void WheelQuest3IkIncrementalROS::publishKuavoArmTrajJointStates(sensor_msgs::Jo
 void WheelQuest3IkIncrementalROS::publishJointStates() {
   Eigen::VectorXd finalArmAngles;
   Eigen::VectorXd finalLbAngles;
-  nlohmann::json candidateMetadata = nullptr;
+  std::optional<DaggerCandidateStatus> candidateStatus;
   const bool leftGripPressed = isDaggerLeftGripRequested();
   const bool rightGripPressed = isDaggerRightGripRequested();
   {
@@ -2688,11 +2697,10 @@ void WheelQuest3IkIncrementalROS::publishJointStates() {
       candidateRightPublishActive_ = rightGripForPublish;
       // Metadata and the q/v snapshot share this lock. Never pair an old q/v
       // with readiness read after a concurrent new grip request.
-      candidateMetadata = {
-          {"left_generation", candidateLeftGripGeneration_},
-          {"right_generation", candidateRightGripGeneration_},
-          {"left_ready", leftGripForPublish}, {"right_ready", rightGripForPublish},
-          {"left_requested", isDaggerLeftGripRequested()}, {"right_requested", isDaggerRightGripRequested()}};
+      candidateStatus = DaggerCandidateStatus{
+          candidateLeftGripGeneration_, candidateRightGripGeneration_,
+          leftGripForPublish, rightGripForPublish,
+          isDaggerLeftGripRequested(), isDaggerRightGripRequested()};
     }
 
     previousPublishedQ = latest_q_;
@@ -2837,7 +2845,7 @@ void WheelQuest3IkIncrementalROS::publishJointStates() {
     armJintStateMsg.effort[i] = 0.0;
   }
 
-  publishKuavoArmTrajJointStates(armJintStateMsg, std::move(candidateMetadata));
+  publishKuavoArmTrajJointStates(armJintStateMsg, std::move(candidateStatus));
   {
     std::lock_guard<std::mutex> lock(lbLegTargetMutex_);
     hasLatestLbTargetAngles_ = (finalLbAngles.size() == 4);
@@ -3558,7 +3566,8 @@ void WheelQuest3IkIncrementalROS::initialize(const nlohmann::json& configJson) {
   armTrajLatencyPublisher_ = nodeHandle_.advertise<std_msgs::Float64>("/vr_incremental/arm_traj_latency_ms", 10);
   if (daggerCandidateOnly_) {
     candidateSessionId_ = std::to_string(ros::WallTime::now().toNSec());
-    daggerArmCandidatePublisher_ = nodeHandle_.advertise<std_msgs::String>("/dagger/vr/arm_candidate", 1);
+    daggerArmCandidatePublisher_ =
+        nodeHandle_.advertise<kuavo_msgs::DaggerArmCandidate>("/dagger/vr/arm_candidate", 1);
   } else {
   arm_traj_writer_.init(nodeHandle_, "/humanoid_wheel/set_incremental_arm_traj_link",
                         "/wheel_ik/set_incremental_arm_traj_link");

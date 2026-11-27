@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <string>
 #include <thread>
 #include <vector>
@@ -18,10 +19,12 @@
 #include <sensor_msgs/JointState.h>
 #include <std_msgs/Float64.h>
 #include <std_msgs/Bool.h>
-#include <std_msgs/String.h>
 #include <visualization_msgs/MarkerArray.h>
 #include <kuavo_msgs/twoArmHandPose.h>
 #include <kuavo_msgs/Float32MultiArrayStamped.h>
+#include <kuavo_msgs/DaggerArmCandidate.h>
+#include <kuavo_msgs/DaggerWaistCandidate.h>
+#include <kuavo_msgs/DaggerWaistConfig.h>
 
 #include <noitom_hi5_hand_udp_python/PoseInfoList.h>
 #include <leju_utils/define.hpp>
@@ -86,14 +89,14 @@ class WheelQuest3IkIncrementalROS final : public WheelArmControlBaseROS {
 
   void daggerLeftInterventionCallback(const std_msgs::Bool::ConstPtr& msg);
   void daggerRightInterventionCallback(const std_msgs::Bool::ConstPtr& msg);
-  void daggerWaistConfigCallback(const std_msgs::String::ConstPtr& msg);
+  void daggerWaistConfigCallback(const kuavo_msgs::DaggerWaistConfig::ConstPtr& msg);
   void daggerBodyPoseCallback(const geometry_msgs::PoseStamped::ConstPtr& msg);
   void updateDaggerWaistGrip(bool left, bool requested);
   bool daggerWaistRequestedLocked(const ros::Time& now) const;
   void updateDaggerWaistCandidate();
-  nlohmann::json daggerWaistMetadata();
+  kuavo_msgs::DaggerWaistCandidate daggerWaistMetadata();
 
-  struct DaggerWaistConfig {
+  struct DaggerWaistConfigState {
     std::string session;
     std::string whichArm = "both";
     Eigen::Vector4d lower = Eigen::Vector4d::Zero();
@@ -105,15 +108,13 @@ class WheelQuest3IkIncrementalROS final : public WheelArmControlBaseROS {
   ros::Subscriber daggerWaistConfigSubscriber_;
   ros::Subscriber daggerBodyPoseSubscriber_;
   std::mutex daggerWaistMutex_;  // Protect input snapshots, never held during IK.
-  DaggerWaistConfig daggerWaistConfig_;
+  DaggerWaistConfigState daggerWaistConfig_;
   geometry_msgs::PoseStamped daggerBodyPose_;
   bool daggerWaistLeftGrip_ = false;
   bool daggerWaistRightGrip_ = false;
   ros::Time daggerWaistLeftStamp_, daggerWaistRightStamp_;
   uint64_t daggerWaistInputEpoch_ = 0;
-  nlohmann::json daggerWaistCandidate_ = {
-      {"config_session", ""}, {"requested", false}, {"ready", false},
-      {"generation", 0}, {"stamp_ns", 0}, {"position", {0., 0., 0., 0.}}};
+  kuavo_msgs::DaggerWaistCandidate daggerWaistCandidate_;
   // The following follower state belongs exclusively to the IK solve thread.
   uint64_t daggerWaistEpoch_ = 0;
   uint64_t daggerWaistGeneration_ = 0;
@@ -290,11 +291,19 @@ class WheelQuest3IkIncrementalROS final : public WheelArmControlBaseROS {
   bool updateRightHandChangingMode(const Eigen::Vector3d& rightTargetPos);
 
   // 发布函数
+  struct DaggerCandidateStatus {
+    uint64_t leftGeneration = 0;
+    uint64_t rightGeneration = 0;
+    bool leftReady = false;
+    bool rightReady = false;
+    bool leftRequested = false;
+    bool rightRequested = false;
+  };
   void publishJointStates();
   void publishDefaultJointStates();
   // 同线程发布 kuavo_arm_traj(_cpp/_rad) 及 shadow 探针（用于对比到达时间）
   void publishKuavoArmTrajJointStates(sensor_msgs::JointState armJintStateMsg,
-                                     nlohmann::json candidateMetadata = nullptr);
+                                     std::optional<DaggerCandidateStatus> candidateStatus = std::nullopt);
   void publishZeroJointStates();
   void publishLegJointStates();         // 发布下肢关节状态（基于 IK 解）
   void publishDefaultLegJointStates();  // 发布下肢关节默认状态

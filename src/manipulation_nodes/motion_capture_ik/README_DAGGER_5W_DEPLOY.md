@@ -8,6 +8,21 @@
 
 按照仓库 [readme.md](../../../readme.md#编译) 中的教程编译。
 
+先编译 `kuavo_msgs`，再编译 `motion_capture_ik`。完成后可核对两端使用的
+ROS 线协议：
+
+```bash
+rosmsg md5 kuavo_msgs/DaggerArmCandidate
+rosmsg md5 kuavo_msgs/DaggerWaistCandidate
+rosmsg md5 kuavo_msgs/DaggerWaistConfig
+rosmsg md5 kuavo_msgs/DaggerDecision
+```
+
+预期依次为 `f172986a90f62d32791d9f28992663fa`、
+`c901154ee9f9f9b3069cd0ab13e0515c`、
+`975e3a81dee84bb32f7c146ba60c09bd`、
+`2a016b07426b3bca5a38d7a7eb217756`。
+
 ## 启动
 
 两机 ROS 终端使用同一个 `ROS_MASTER_URI`，各自的 `ROS_IP` 必须可被对端访问，并同步时钟。切换到 root 后也要确认网络配置；具体网络及边侧环境安装见 LeTools-Learning 的 `README_DAGGER.md`。
@@ -65,21 +80,22 @@ roslaunch noitom_hi5_hand_udp_python launch_quest3_ik.launch \
 
 | 话题 | 类型与内容 |
 |---|---|
-| `/dagger/vr/arm_candidate` | `std_msgs/String`，JSON `schema_version=1`；左 7 维、右 7 维位置 rad 和速度 rad/s，以及同帧接管状态和 `waist` 扩展 |
+| `/dagger/vr/arm_candidate` | `kuavo_msgs/DaggerArmCandidate`，`schema_version=1`；左 7 维、右 7 维位置 rad 和速度 rad/s，以及同帧接管状态和嵌套的 `waist` 候选 |
 | `/dagger/vr/eef_action` | `sensor_msgs/JointState.position=[左 trigger,右 trigger]`，范围 `[0,1]` |
 | `/dagger/vr/left_intervention`、`/dagger/vr/right_intervention` | `std_msgs/Bool`；grip 达到 0.70 按下，降到 0.30 释放，随 joystick 输入持续更新 |
 | `/dagger/vr/body_pose` | `geometry_msgs/PoseStamped`；适配器从 Chest（索引 23）生成，KRC 本地用于腰部计算 |
-| `/dagger/vr/waist_config` | `std_msgs/String`；腰部介入开启时，由边侧自动发布锁存配置 |
+| `/dagger/vr/waist_config` | `kuavo_msgs/DaggerWaistConfig`；腰部介入开启时，由边侧自动发布锁存配置 |
+| `/dagger/decision` | `kuavo_msgs/DaggerDecision`；KRC 提供共享消息定义，由 LeTools 发布并录制实际仲裁结果 |
 
-手臂 JSON 包含 `schema_version/session/sequence/stamp_ns/position/velocity`、`left_requested/right_requested`、`left_ready/right_ready`、`left_generation/right_generation` 及 `waist` 对象。手臂数组始终为 14 维，不包含夹爪或下身。当前边侧使用这一 JSON 协议，不接收旧的 `/dagger/vr/arm_action` JointState 手臂协议。
+`DaggerArmCandidate` 包含 `header/schema_version/session/sequence/position/velocity`、`left_requested/right_requested`、`left_ready/right_ready`、`left_generation/right_generation` 及嵌套的 `waist`。手臂数组始终为 14 维，不包含夹爪或下身。当前边侧使用这一强类型协议，不接收旧的 `/dagger/vr/arm_action` JointState 手臂协议。
 
 节点重启改变 `session`，每个发布帧递增 `sequence`；grip 状态变化或输入失效会撤销 ready 并更新代次。完成当前代次的实测重锚和有效 IK 后才 ready；对应侧首个 ready 帧使用当前实测位置和零速度。未接管侧不沿用上一轮 VR 缓存。`ready=true` 只表示候选准备好，实际接管还取决于边侧收到新鲜请求、候选和末端输入后的仲裁。
 
-手臂 `stamp_ns` 是候选发布时的 ROS 时间，不是硬件执行时间。KRC 另行检查原始关节反馈消息的时间戳、骨骼接收和介入心跳，手臂侧上限固定为 0.2 秒；反馈过期时跳过候选发布，骨骼/心跳过期时撤销对应请求与就绪。边侧还检查候选及信号年龄，调大边侧超时不会放宽下位机固定的手臂检查。
+手臂 `header.stamp` 是候选发布时的 ROS 时间，不是硬件执行时间。KRC 另行检查原始关节反馈消息的时间戳、骨骼接收和介入心跳，手臂侧上限固定为 0.2 秒；反馈过期时跳过候选发布，骨骼/心跳过期时撤销对应请求与就绪。边侧还检查候选及信号年龄，调大边侧超时不会放宽下位机固定的手臂检查。
 
-腰部扩展保持 JSON schema 1，包含 `config_session/requested/ready/generation/stamp_ns/position`，位置顺序为 `[knee,leg,waist_pitch,waist_yaw]`，单位 rad。边侧配置包含 `schema_version=1`、`session/which_arm/lower/upper/lock_mask/lock_position/max_speed/action_timeout/signal_timeout`。KRC 确认配置会话，在有效控制侧 grip 按住时建立身体增量锚点并求解；输入、反馈或求解失效时撤销腰部 ready。
+嵌套的 `DaggerWaistCandidate` 包含 `config_session/requested/ready/generation/source_stamp/position`，位置顺序为 `[knee,leg,waist_pitch,waist_yaw]`，单位 rad。边侧使用 `DaggerWaistConfig` 发送 `schema_version=1`、`session/which_arm/lower/upper/lock_mask/lock_position/max_speed/action_timeout/signal_timeout`。KRC 确认配置会话，在有效控制侧 grip 按住时建立身体增量锚点并求解；输入、反馈或求解失效时撤销腰部 ready。
 
-腰部 `stamp_ns` 取本次依赖的身体位姿与传感器反馈中较早的时间，未就绪时为 0。身体位姿时间戳由输入适配器在回调时生成；重复发布腰部候选不会刷新旧输入年龄。腰部的动作/信号超时使用边侧配置，默认 0.2 秒；关节限位、锁定和速度限制来自边侧配置，并与 KRC URDF 限位结合。腰部介入使用身体位姿与 grip，不使用普通 VR 的 X+摇杆开关。
+腰部 `source_stamp` 取本次依赖的身体位姿与传感器反馈中较早的时间，未就绪时为零时间。身体位姿时间戳由输入适配器在回调时生成；重复发布腰部候选不会刷新旧输入年龄。腰部的动作/信号超时使用边侧配置，默认 0.2 秒；关节限位、锁定和速度限制来自边侧配置，并与 KRC URDF 限位结合。腰部介入使用身体位姿与 grip，不使用普通 VR 的 X+摇杆开关。
 
 机器人执行话题仍遵循原有单位：`/kuavo_arm_traj` 为角度和角速度，`/lb_leg_traj` 为角度。候选和执行话题不可混用。
 
