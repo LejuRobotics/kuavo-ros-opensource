@@ -31,7 +31,8 @@ void SG100VrGestureClient::start() {
   step_client_ = nh_.serviceClient<kuavo_msgs::SG100StepGesture>("/sg100/vr_step_gesture");
   stop_.store(false);
   thread_ = std::thread(&SG100VrGestureClient::loop, this);
-  ROS_INFO("[SG100VrGestureClient] publishing %s, stepping via /sg100/vr_step_gesture",
+  ROS_INFO("[SG100VrGestureClient] publishing %s, stepping via /sg100/vr_step_gesture; "
+           "press Y to lock/unlock the current trigger",
            kSg100TriggerTopic);
 }
 
@@ -63,9 +64,30 @@ void SG100VrGestureClient::loop() {
       rate.sleep();
       continue;
     }
+    // 与 Drake 绝对式一致：左手 Y 按下沿锁定当前扳机，再按一次解除。
+    // 锁定期间不再切手势，并继续发布按下瞬间的值，避免松手。
+    const bool y_pressed = vr_.left_second_pressed && vr_.left_second_pressed();
+    if (y_pressed && !y_pressed_last_) {
+      finger_locked_ = !finger_locked_;
+      pending_dir_ = 0;
+      debounce_ = true;
+      if (finger_locked_) {
+        frozen_left_ = std::max(0.f, std::min(1.f, static_cast<float>(trigger.data[0])));
+        frozen_right_ = std::max(0.f, std::min(1.f, static_cast<float>(trigger.data[1])));
+      }
+      ROS_INFO("[SG100VrGestureClient] Button Y is pressed. SG100 finger lock: %s",
+               finger_locked_ ? "ON" : "OFF");
+    }
+    y_pressed_last_ = y_pressed;
+    if (finger_locked_) {
+      trigger.data[0] = frozen_left_;
+      trigger.data[1] = frozen_right_;
+    }
     trigger_pub_.publish(trigger);
     had_fresh_input = true;
-    checkVrGestureSwitch();
+    if (!finger_locked_) {
+      checkVrGestureSwitch();
+    }
     rate.sleep();
   }
   if (had_fresh_input && ros::ok()) {
