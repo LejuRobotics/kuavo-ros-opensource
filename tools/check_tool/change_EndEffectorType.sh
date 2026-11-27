@@ -75,83 +75,54 @@ done
 echo -e "${GREEN}✓ 所有文件存在${NC}"
 echo ""
 
-# 检查当前配置的末端执行器类型
 echo -e "${BLUE}=== 检查当前配置 ===${NC}"
-current_type=""
-qiangnao_total=0
-qiangnao_touch_total=0
-lejuclaw_total=0
-none_total=0
-qibeng_total=0
-linker_hand_total=0
-heiman_total=0
+current_config=$(python3 - "${files_to_check[@]}" <<'PY'
+import json
+import sys
+import xml.etree.ElementTree as ET
+from collections import Counter
+from pathlib import Path
 
-for file in "${files_to_check[@]}"; do
-    # 检查各种格式
-    qiangnao_count=$(grep -oE '(qiangnao|"qiangnao"|default="qiangnao")' "$file" 2>/dev/null | wc -l)
-    qiangnao_touch_count=$(grep -oE '(qiangnao_touch|"qiangnao_touch"|default="qiangnao_touch")' "$file" 2>/dev/null | wc -l)
-    lejuclaw_count=$(grep -oE '(lejuclaw|"lejuclaw"|default="lejuclaw")' "$file" 2>/dev/null | wc -l)
-    none_count=$(grep -oE '("None"|"none"|default="none")' "$file" 2>/dev/null | wc -l)
-    qibeng_count=$(grep -oE '("Qibeng"|"qibeng"|default="qibeng")' "$file" 2>/dev/null | wc -l)
-    linker_hand_count=$(grep -oE '("linker_hand"|"Linker_hand"|default="linker_hand")' "$file" 2>/dev/null | wc -l)
-    heiman_count=$(grep -oE '("heiman"|"Heiman"|default="heiman")' "$file" 2>/dev/null | wc -l)
-    # 黑漫配置也可能在其他字段使用 "none"，仅统计实际末端配置。
-    if [[ "$file" == *.json ]] && [ "$heiman_count" -gt 0 ]; then
-        none_count=$(sed -n '/"EndEffectorType"[[:space:]]*:/ { :array; /\]/! { N; b array; }; p; }' "$file" |
-            grep -oE '"(None|none)"' | wc -l)
-    fi
-    
-    qiangnao_total=$((qiangnao_total + qiangnao_count))
-    qiangnao_touch_total=$((qiangnao_touch_total + qiangnao_touch_count))
-    lejuclaw_total=$((lejuclaw_total + lejuclaw_count))
-    none_total=$((none_total + none_count))
-    qibeng_total=$((qibeng_total + qibeng_count))
-    linker_hand_total=$((linker_hand_total + linker_hand_count))
-    heiman_total=$((heiman_total + heiman_count))
-done
+try:
+    config_path, *launch_paths = sys.argv[1:]
+    config = json.loads(Path(config_path).read_bytes())
+    hands = config.get("EndEffectorType") if isinstance(config, dict) else None
+    if not isinstance(hands, list) or len(hands) != 2 or not all(
+        isinstance(value, str) and value for value in hands
+    ):
+        raise ValueError(f"{config_path} 的 EndEffectorType 必须包含左右手两个类型")
 
-# 判断当前配置的末端执行器类型
-if [ "$qiangnao_total" -gt 0 ] && [ "$qiangnao_touch_total" -eq 0 ] && [ "$lejuclaw_total" -eq 0 ] && [ "$none_total" -eq 0 ] && [ "$qibeng_total" -eq 0 ] && [ "$linker_hand_total" -eq 0 ] && [ "$heiman_total" -eq 0 ]; then
-    current_type="qiangnao"
-elif [ "$qiangnao_touch_total" -gt 0 ] && [ "$qiangnao_total" -eq 0 ] && [ "$lejuclaw_total" -eq 0 ] && [ "$none_total" -eq 0 ] && [ "$qibeng_total" -eq 0 ] && [ "$linker_hand_total" -eq 0 ] && [ "$heiman_total" -eq 0 ]; then
-    current_type="qiangnao_touch"
-elif [ "$lejuclaw_total" -gt 0 ] && [ "$qiangnao_total" -eq 0 ] && [ "$qiangnao_touch_total" -eq 0 ] && [ "$none_total" -eq 0 ] && [ "$qibeng_total" -eq 0 ] && [ "$linker_hand_total" -eq 0 ] && [ "$heiman_total" -eq 0 ]; then
-    current_type="lejuclaw"
-elif [ "$none_total" -gt 0 ] && [ "$qiangnao_total" -eq 0 ] && [ "$qiangnao_touch_total" -eq 0 ] && [ "$lejuclaw_total" -eq 0 ] && [ "$qibeng_total" -eq 0 ] && [ "$linker_hand_total" -eq 0 ] && [ "$heiman_total" -eq 0 ]; then
-    current_type="none"
-elif [ "$qibeng_total" -gt 0 ] && [ "$qiangnao_total" -eq 0 ] && [ "$qiangnao_touch_total" -eq 0 ] && [ "$lejuclaw_total" -eq 0 ] && [ "$none_total" -eq 0 ] && [ "$linker_hand_total" -eq 0 ] && [ "$heiman_total" -eq 0 ]; then
-    current_type="qibeng"
-elif [ "$linker_hand_total" -gt 0 ] && [ "$qiangnao_total" -eq 0 ] && [ "$qiangnao_touch_total" -eq 0 ] && [ "$lejuclaw_total" -eq 0 ] && [ "$none_total" -eq 0 ] && [ "$qibeng_total" -eq 0 ] && [ "$heiman_total" -eq 0 ]; then
-    current_type="linker_hand"
-elif [ "$heiman_total" -gt 0 ] && [ "$qiangnao_total" -eq 0 ] && [ "$qiangnao_touch_total" -eq 0 ] && [ "$lejuclaw_total" -eq 0 ] && [ "$none_total" -eq 0 ] && [ "$qibeng_total" -eq 0 ] && [ "$linker_hand_total" -eq 0 ]; then
-    current_type="heiman"
-elif [ "$qiangnao_total" -eq 0 ] && [ "$qiangnao_touch_total" -eq 0 ] && [ "$lejuclaw_total" -eq 0 ] && [ "$none_total" -eq 0 ] && [ "$qibeng_total" -eq 0 ] && [ "$linker_hand_total" -eq 0 ] && [ "$heiman_total" -eq 0 ]; then
-    current_type="none"
-else
-    current_type="mixed"
-fi
+    counts = Counter(value.lower() for value in hands)
+    for launch_path in launch_paths:
+        args = ET.parse(launch_path).findall("./arg[@name='ee_type']")
+        if len(args) != 1 or args[0].get("default") is None:
+            raise ValueError(f"{launch_path} 的顶层 ee_type 缺失、重复或没有默认值")
+        default = args[0].get("default")
+        if default:
+            counts[default.lower()] += 1
 
-# 显示当前配置
+except (ValueError, OSError, ET.ParseError) as error:
+    print(f"读取当前末端配置失败：{error}", file=sys.stderr)
+    sys.exit(1)
+
+if len(counts) == 1:
+    current_type, count = next(iter(counts.items()))
+    print(current_type)
+    print(count)
+else:
+    print("mixed")
+    print(", ".join(f"{name}: {count}" for name, count in sorted(counts.items())))
+PY
+) || exit 1
+current_type=${current_config%%$'\n'*}
+type_counts=${current_config#*$'\n'}
+
 echo -e "${YELLOW}当前配置的末端执行器类型:${NC}"
 if [ "$current_type" = "mixed" ]; then
-    echo -e "  ${YELLOW}混合配置 (qiangnao: $qiangnao_total, qiangnao_touch: $qiangnao_touch_total, lejuclaw: $lejuclaw_total, none: $none_total, qibeng: $qibeng_total, linker_hand: $linker_hand_total, heiman: $heiman_total)${NC}"
+    printf '  %b混合配置（%s）%b\n' "$YELLOW" "$type_counts" "$NC"
 else
-    echo -e "  ${GREEN}$current_type${NC}"
-    if [ "$current_type" = "qiangnao" ]; then
-        echo -e "  (出现次数: $qiangnao_total)"
-    elif [ "$current_type" = "qiangnao_touch" ]; then
-        echo -e "  (出现次数: $qiangnao_touch_total)"
-    elif [ "$current_type" = "lejuclaw" ]; then
-        echo -e "  (出现次数: $lejuclaw_total)"
-    elif [ "$current_type" = "none" ]; then
-        echo -e "  (出现次数: $none_total)"
-    elif [ "$current_type" = "qibeng" ]; then
-        echo -e "  (出现次数: $qibeng_total)"
-    elif [ "$current_type" = "linker_hand" ]; then
-        echo -e "  (出现次数: $linker_hand_total)"
-    elif [ "$current_type" = "heiman" ]; then
-        echo -e "  (出现次数: $heiman_total)"
-    fi
+    printf '  %b%s%b\n' "$GREEN" "$current_type" "$NC"
+    printf '  (出现次数: %s)\n' "$type_counts"
 fi
 echo ""
 
@@ -223,83 +194,113 @@ echo -e "${BLUE}开始执行替换操作...${NC}"
 echo -e "${YELLOW}目标类型: $target_type${NC}"
 echo ""
 
-# 执行替换操作
-# 如果是 qibeng 或 linker_hand，只处理 config_file
-if [ "$target_type" = "qibeng" ] || [ "$target_type" = "linker_hand" ]; then
-    files_to_process=("$config_file")
-else
-    files_to_process=("${files_to_check[@]}")
-fi
+# 同步更新当前机型的 JSON 和两份 Launch。
+if ! python3 - "$target_type" "${files_to_check[@]}" <<'PY'
+import json
+import os
+import re
+import stat
+import sys
+import tempfile
+import xml.etree.ElementTree as ET
+from pathlib import Path
 
-for file in "${files_to_process[@]}"; do
-    echo "处理: $file"
-    
-    # 根据文件类型进行不同的替换
-    if [[ "$file" == *.json ]]; then
-        # JSON 文件：替换 "EndEffectorType" 数组中的值
-        if [ "$target_type" = "none" ]; then
-            # 替换为 "None"
-            sed -i 's/"qiangnao"/"None"/g' "$file"
-            sed -i 's/"qiangnao_touch"/"None"/g' "$file"
-            sed -i 's/"lejuclaw"/"None"/g' "$file"
-            sed -i 's/"qibeng"/"None"/g' "$file"
-            sed -i 's/"linker_hand"/"None"/g' "$file"
-            sed -i 's/"heiman"/"None"/g' "$file"
-            sed -i 's/"None"/"None"/g' "$file"  # 确保已经是 None
-            echo -e "${GREEN}✓ JSON 文件已更新为 None${NC}"
-        else
-            # 替换为目标类型（带引号）
-            sed -i "s/\"qiangnao\"/\"$target_type\"/g" "$file"
-            sed -i "s/\"qiangnao_touch\"/\"$target_type\"/g" "$file"
-            sed -i "s/\"lejuclaw\"/\"$target_type\"/g" "$file"
-            sed -i "s/\"qibeng\"/\"$target_type\"/g" "$file"
-            sed -i "s/\"linker_hand\"/\"$target_type\"/g" "$file"
-            sed -i "s/\"heiman\"/\"$target_type\"/g" "$file"
-            sed -i "s/\"None\"/\"$target_type\"/g" "$file"
-            echo -e "${GREEN}✓ JSON 文件已更新为 $target_type${NC}"
-        fi
-    elif [[ "$file" == *.launch ]]; then
-        # Launch 文件：替换 default="..." 格式
-        if [ "$target_type" = "none" ]; then
-            sed -i 's/default="qiangnao"/default="none"/g' "$file"
-            sed -i 's/default="qiangnao_touch"/default="none"/g' "$file"
-            sed -i 's/default="lejuclaw"/default="none"/g' "$file"
-            sed -i 's/default="qibeng"/default="none"/g' "$file"
-            sed -i 's/default="linker_hand"/default="none"/g' "$file"
-            sed -i 's/default="heiman"/default="none"/g' "$file"
-            sed -i 's/default="none"/default="none"/g' "$file"  # 确保已经是 none
-            echo -e "${GREEN}✓ Launch 文件已更新为 none${NC}"
-        else
-            sed -i "s/default=\"qiangnao\"/default=\"$target_type\"/g" "$file"
-            sed -i "s/default=\"qiangnao_touch\"/default=\"$target_type\"/g" "$file"
-            sed -i "s/default=\"lejuclaw\"/default=\"$target_type\"/g" "$file"
-            sed -i "s/default=\"qibeng\"/default=\"$target_type\"/g" "$file"
-            sed -i "s/default=\"linker_hand\"/default=\"$target_type\"/g" "$file"
-            sed -i "s/default=\"heiman\"/default=\"$target_type\"/g" "$file"
-            sed -i "s/default=\"none\"/default=\"$target_type\"/g" "$file"
-            echo -e "${GREEN}✓ Launch 文件已更新为 $target_type${NC}"
-        fi
-    else
-        # 其他文件：通用替换
-        if [ "$target_type" = "none" ]; then
-            sed -i 's/qiangnao/none/g' "$file"
-            sed -i 's/qiangnao_touch/none/g' "$file"
-            sed -i 's/lejuclaw/none/g' "$file"
-            sed -i 's/qibeng/none/g' "$file"
-            sed -i 's/linker_hand/none/g' "$file"
-            sed -i 's/heiman/none/g' "$file"
-            echo -e "${GREEN}✓ 文件已更新为 none${NC}"
-        else
-            sed -i "s/qiangnao/$target_type/g" "$file"
-            sed -i "s/qiangnao_touch/$target_type/g" "$file"
-            sed -i "s/lejuclaw/$target_type/g" "$file"
-            sed -i "s/qibeng/$target_type/g" "$file"
-            sed -i "s/linker_hand/$target_type/g" "$file"
-            sed -i "s/heiman/$target_type/g" "$file"
-            echo -e "${GREEN}✓ 文件已更新为 $target_type${NC}"
-        fi
-    fi
-done
+target = sys.argv[1]
+updates = []
+temporary_files = []
+written = []
+
+try:
+    # 所有文件通过字段和格式检查后，再开始写入。
+    for filename in sys.argv[2:]:
+        path = Path(filename)
+        original = path.read_bytes()
+        text = original.decode("utf-8")
+
+        if path.suffix == ".json":
+            data = json.loads(text)
+            values = data.get("EndEffectorType")
+            if not isinstance(values, list) or len(values) != 2:
+                raise ValueError(f"{path} 的 EndEffectorType 必须包含左右手两个值")
+
+            value = "None" if target == "none" else target
+            expected = [value, value]
+            pattern = r'(?m)^([ \t]*"EndEffectorType"\s*:\s*)\[[^\]]*\]'
+            updated, count = re.subn(
+                pattern,
+                lambda match: match[1] + json.dumps(expected),
+                text,
+            )
+            data["EndEffectorType"] = expected
+            if count != 1 or json.loads(updated) != data:
+                raise ValueError(f"{path} 的 EndEffectorType 替换校验失败")
+
+        elif path.suffix == ".launch":
+            # 只匹配固定默认值，包括空值，保留 $(arg ee_type) 转发。
+            pattern = (
+                r'(?m)^([ \t]*<arg\b(?=[^>]*\bname="ee_type")'
+                r'[^>]*\bdefault=")[^"$]*(")'
+            )
+            updated, count = re.subn(
+                pattern,
+                lambda match: match[1] + target + match[2],
+                text,
+            )
+            args = ET.fromstring(updated).findall("./arg[@name='ee_type']")
+            if count != 1 or len(args) != 1 or args[0].get("default") != target:
+                raise ValueError(f"{path} 的顶层 ee_type 缺失、重复或替换校验失败")
+
+        else:
+            raise ValueError(f"不支持的文件类型 {path}")
+
+        updates.append((path, original, updated.encode("utf-8")))
+
+    # 在各文件所在目录准备新内容和回滚内容，避免写入中途截断。
+    for path, original, updated in updates:
+        file_stat = path.stat()
+        staged = []
+        for content in (updated, original):
+            with tempfile.NamedTemporaryFile(dir=path.parent, delete=False) as stream:
+                temporary = Path(stream.name)
+                temporary_files.append(temporary)
+                stream.write(content)
+                stream.flush()
+                os.fsync(stream.fileno())
+                os.fchown(stream.fileno(), file_stat.st_uid, file_stat.st_gid)
+                os.fchmod(stream.fileno(), stat.S_IMODE(file_stat.st_mode))
+            staged.append(temporary)
+        written.append((path, staged[0], staged[1]))
+
+    for path, staged, backup in written:
+        os.replace(staged, path)
+
+    # 写入后逐个读回核对，全部成功后输出成功提示。
+    for path, original, updated in updates:
+        if path.read_bytes() != updated:
+            raise OSError(f"{path} 写入后内容校验失败")
+
+except (Exception, KeyboardInterrupt) as error:
+    print(f"配置修改失败 {error}", file=sys.stderr)
+    for path, staged, backup in reversed(written):
+        if not staged.exists():
+            try:
+                os.replace(backup, path)
+            except OSError as rollback_error:
+                # 保留原内容，便于恢复。
+                temporary_files.remove(backup)
+                print(f"回滚失败 {path}，原内容保留在 {backup}，{rollback_error}", file=sys.stderr)
+    sys.exit(1)
+finally:
+    for temporary in temporary_files:
+        temporary.unlink(missing_ok=True)
+
+for path, original, updated in updates:
+    print(f"✓ 已更新并校验 {path}")
+PY
+then
+    echo -e "${RED}末端执行器配置更新失败${NC}" >&2
+    exit 1
+fi
 
 echo ""
 echo -e "${GREEN}=== 替换操作完成 ===${NC}"
