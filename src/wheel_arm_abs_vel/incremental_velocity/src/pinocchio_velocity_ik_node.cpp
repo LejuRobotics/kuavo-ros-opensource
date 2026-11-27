@@ -101,6 +101,8 @@ constexpr int kTorsoConstraintCount = 4;
 // WheelQuest3IkIncrementalTools mode-2 entry, in seconds from acquisition.
 constexpr double kEntryArmSyncDuration = 0.3;
 constexpr double kEntryArmDuration = 2.0;
+// Same chest half-space as Workspace.project: wrist stays in front of the torso.
+constexpr double kResetHandFrontMargin = -0.03;
 // Sensor/decision lower-body order is [knee, leg, waist_pitch, waist_yaw].
 // Behavioural admission follows physical drivability from the top down.
 constexpr std::array<int, kLowerBodyDof> kLowerRecruitmentOrder{3, 2, 1, 0};
@@ -2009,6 +2011,9 @@ class PinocchioVelocityIk {
       incremental_chest_upper_ << b.at("chest_upper_bound").at(0).get<double>(),
           b.at("chest_upper_bound").at(2).get<double>(), b.at("pitch_upper").get<double>(), b.at("yaw_upper").get<double>();
       incremental_grip_height_ = b.value("vr_chest_upper_bound_z", incremental_chest_upper_[1]);
+      incremental_elbow_clearance_ = b.value("min_p1_xy_norm", incremental_elbow_clearance_);
+      if (!std::isfinite(incremental_elbow_clearance_) || incremental_elbow_clearance_ < 0.0)
+        incremental_elbow_clearance_ = 0.2;
     }
     std::string model_contract_json;
     if (!nh_.getParam("/whole_body_velocity_ik/model_contract_json", model_contract_json))
@@ -5703,6 +5708,133 @@ class PinocchioVelocityIk {
     return result;
   }
 
+  // Ready-pose reset servos every arm joint on its own. From a yawed elbow that
+  // path swings the hand through the chest. Once a short extrapolation would
+  // cross the chest plane or the elbow clearance, follow the ready hand in a
+  // straight line and only then settle the joints. The final command is not
+  // allowed to step back through either limit.
+  void keepResetArmsOutsideTorso(DecisionVector* velocity,
+                                 const DecisionVector& preparation_target,
+                                 double cycle_dt) {
+    if (velocity == nullptr || cycle_dt <= 0.0 || !velocity->allFinite()) return;
+    const auto& torso = plant_->GetFrameByName(torso_frame_name_);
+    const auto point = [&](const DecisionVector& q, const std::string& frame) {
+      setPlantDecisionPositions(q);
+      const auto pose = plant_->GetFrameByName(frame).CalcPose(*plant_context_, torso);
+      return Eigen::Vector3d(pose.translation());
+    };
+    const double horizon = 0.15;
+    for (int arm = 0; arm < kArmCount; ++arm) {
+      const double sign = arm == 0 ? 1.0 : -1.0;
+      DecisionVector goal_q = reference_q_;
+      Vector7d joint_velocity;
+      double joint_error = 0.0;
+      for (int joint = 0; joint < kJointsPerArm; ++joint) {
+        const int index = armDecisionIndex(arm, joint);
+        goal_q(index) = preparation_target(index);
+        joint_velocity(joint) = (*velocity)(index);
+        joint_error = std::max(
+            joint_error, std::abs(preparation_target(index) - reference_q_(index)));
+      }
+      const Eigen::Vector3d hand = point(reference_q_, hand_frame_names_.at(arm));
+      const Eigen::Vector3d elbow = point(reference_q_, elbow_frame_names_.at(arm));
+      const Eigen::Vector3d goal_hand = point(goal_q, hand_frame_names_.at(arm));
+      const Eigen::Vector3d goal_elbow = point(goal_q, elbow_frame_names_.at(arm));
+      const double hand_error = (goal_hand - hand).norm();
+      if (joint_error <= preparation_position_tolerance_ && hand_error <= 0.03) {
+        reset_clearance_return_.at(arm) = false;
+        continue;
+      }
+      DecisionVector predicted = reference_q_;
+      for (int joint = 0; joint < kJointsPerArm; ++joint) {
+        const int index = armDecisionIndex(arm, joint);
+        const double limit = std::min(velocity_limit_(index), preparation_arm_velocity_limit_);
+        predicted(index) = std::clamp(
+            reference_q_(index) + joint_velocity(joint) * horizon,
+            position_lower_(index), position_upper_(index));
+      }
+      const Eigen::Vector3d next_hand = point(predicted, hand_frame_names_.at(arm));
+      const Eigen::Vector3d next_elbow = point(predicted, elbow_frame_names_.at(arm));
+      const double hand_floor = std::max(
+          kResetHandFrontMargin, std::min(hand.x(), goal_hand.x()));
+      const double elbow_floor = std::max(
+          incremental_elbow_clearance_,
+          std::min(sign * elbow.y(), sign * goal_elbow.y()));
+      const bool sweeps_in = next_hand.x() < hand_floor - 0.01 ||
+          sign * next_elbow.y() < elbow_floor - 0.01;
+      if (sweeps_in && !reset_clearance_return_.at(arm)) {
+        reset_clearance_return_.at(arm) = true;
+        ROS_INFO("[VelocityIk] reset keeps the %s hand in front of the torso",
+                 arm == 0 ? "left" : "right");
+      }
+      if (!reset_clearance_return_.at(arm)) continue;
+
+      setPlantDecisionPositions(reference_q_);
+      const Matrix3x7d hand_jacobian = selectArmColumns(
+          frameTranslationJacobianRelative(hand_frame_names_.at(arm), torso_frame_name_), arm);
+      const Matrix3x7d elbow_jacobian = selectArmColumns(
+          frameTranslationJacobianRelative(elbow_frame_names_.at(arm), torso_frame_name_), arm);
+      Eigen::Vector3d hand_velocity = goal_hand - hand;
+      if (hand.x() < kResetHandFrontMargin)
+        hand_velocity.x() = std::max(hand_velocity.x(), 0.08);
+      const double cartesian_speed = 0.22;
+      if (hand_velocity.norm() > cartesian_speed && hand_velocity.norm() > 1e-9)
+        hand_velocity *= cartesian_speed / hand_velocity.norm();
+      Eigen::Vector3d elbow_velocity = goal_elbow - elbow;
+      if (sign * elbow.y() < incremental_elbow_clearance_)
+        elbow_velocity.y() = sign * std::max(sign * elbow_velocity.y(), 0.08);
+      if (elbow_velocity.norm() > cartesian_speed && elbow_velocity.norm() > 1e-9)
+        elbow_velocity *= cartesian_speed / elbow_velocity.norm();
+      const bool outside = hand.x() >= hand_floor - 1e-4 &&
+          sign * elbow.y() >= elbow_floor - 1e-4;
+      const double task_scale = outside && hand_error < 0.03
+          ? std::max(0.15, hand_error / 0.03) : 1.0;
+      const double elbow_scale =
+          sign * elbow.y() < incremental_elbow_clearance_ ? 1.0 : 0.35;
+      Eigen::Matrix<double, 6, 7> weighted;
+      weighted.topRows<3>() = task_scale * hand_jacobian;
+      weighted.bottomRows<3>() = (task_scale * elbow_scale) * elbow_jacobian;
+      Eigen::Matrix<double, 6, 1> task;
+      task.head<3>() = task_scale * hand_velocity;
+      task.tail<3>() = (task_scale * elbow_scale) * elbow_velocity;
+      const Eigen::Matrix<double, 6, 6> normal =
+          weighted * weighted.transpose() + 1.0e-3 * Eigen::Matrix<double, 6, 6>::Identity();
+      const Eigen::Matrix<double, 7, 6> inverse = weighted.transpose() * normal.inverse();
+      Vector7d posture;
+      for (int joint = 0; joint < kJointsPerArm; ++joint) {
+        const int index = armDecisionIndex(arm, joint);
+        const double limit = std::min(velocity_limit_(index), preparation_arm_velocity_limit_);
+        posture(joint) = std::clamp(
+            preparation_gain_ * (preparation_target(index) - reference_q_(index)),
+            -limit, limit);
+      }
+      Vector7d command = inverse * task +
+          (Eigen::Matrix<double, 7, 7>::Identity() - inverse * weighted) * posture;
+      const auto reject_inward = [&](const Matrix3x7d& jacobian, int axis, double minimum) {
+        const double rate = jacobian.row(axis) * command;
+        if (rate >= minimum) return;
+        const Vector7d column = jacobian.row(axis).transpose();
+        const double scale = column.squaredNorm();
+        if (scale > 1.0e-8) command -= column * ((rate - minimum) / scale);
+      };
+      const double hand_rate_min = hand.x() < hand_floor - 1.0e-4
+          ? 0.12 : std::min(0.0, (hand_floor - hand.x()) / horizon);
+      reject_inward(hand_jacobian, 0, hand_rate_min);
+      Matrix3x7d lateral_jacobian = elbow_jacobian;
+      if (sign < 0.0) lateral_jacobian.row(1) *= -1.0;
+      const double lateral = sign * elbow.y();
+      const double elbow_rate_min = lateral < elbow_floor - 1.0e-4
+          ? 0.12 : std::min(0.0, (elbow_floor - lateral) / horizon);
+      reject_inward(lateral_jacobian, 1, elbow_rate_min);
+      for (int joint = 0; joint < kJointsPerArm; ++joint) {
+        const int index = armDecisionIndex(arm, joint);
+        const double limit = std::min(velocity_limit_(index), preparation_arm_velocity_limit_);
+        (*velocity)(index) = std::clamp(command(joint), -limit, limit);
+      }
+    }
+    setPlantDecisionPositions(reference_q_);
+  }
+
   void prepareTargetForTracking(TargetSnapshot& world_target,double target_age) {
     const double ff_budget=acquisition_.blend()*input_continuity_.budget;
     world_target.body_intent.desired_torso_velocity *= ff_budget;
@@ -6669,6 +6801,7 @@ class PinocchioVelocityIk {
         preparation_entry_dq_ = reference_dq_;
         preparation_entry_ddq_ = reference_ddq_;
         preparation_entry_elapsed_ = 0.0;
+        reset_clearance_return_.fill(false);
         preparation_active_ = true;
         preparation_complete_ = false;
         preparation_settle_cycles_ = 0;
@@ -6757,6 +6890,9 @@ class PinocchioVelocityIk {
               index, std::min(velocity_limit_(index),
                               preparation_arm_velocity_limit_), position, feedforward);
         }
+      }
+      if (!startup_preparing && !incremental_entry_prepare_) {
+        keepResetArmsOutsideTorso(&preparation_velocity, preparation_target, cycle_dt);
       }
       if (contract_prepare && preparation_handoff_duration_ > 0.0 &&
           preparation_entry_elapsed_ < preparation_handoff_duration_) {
@@ -8466,6 +8602,8 @@ class PinocchioVelocityIk {
   double duplicate_orientation_epsilon_{1.0e-10};
   Eigen::Vector4d incremental_chest_lower_{Eigen::Vector4d::Zero()}, incremental_chest_upper_{Eigen::Vector4d::Zero()};
   double incremental_grip_height_{0.};
+  double incremental_elbow_clearance_{0.2};
+  std::array<bool, kArmCount> reset_clearance_return_{};
   bool incremental_geometry_{false};
   velocity_ik::LowerBodyGripHandoff lower_body_grip_handoff_;
   double lower_body_grip_resume_duration_{1.};

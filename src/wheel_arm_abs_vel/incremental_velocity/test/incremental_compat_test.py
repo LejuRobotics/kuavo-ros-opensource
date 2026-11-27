@@ -166,6 +166,59 @@ class CompatTest(unittest.TestCase):
         self.assertTrue(m.clutch_hold[0] and m.robot_hold_target[0])
         self.assertFalse(m.left_elbow_hint_valid)
 
+    def test_still_hand_keeps_robot_elbow_and_chest_clearance(self):
+        n=IkRos.__new__(IkRos)
+        n._grips=[False,False];n._grip_seq=[1,1];n._side_available=[True,True]
+        n._reach_stops=[ReachStop(),ReachStop()]
+        n._incremental_modes=ArmModes();n._mode_targets=[None,None];n._exit_capture=[None,None]
+        n._orientation_until=[-math.inf]*2;n._next_transfer=[-math.inf]*2;n._orientation_hold=[None,None]
+        n._mode_threshold=.01;n._reset_to_default=False;n._reach_margin=.002
+        n._rotation_limits=[np.array([1.49]*3)]*3
+        n._workspace=[Workspace({},side,([-.6,-1,-1],[.8,1,1])) for side in ('left','right')]
+        n._clutches=[HandClutch([1.]*3,[1.]*3,True,1.) for _ in range(2)]
+        n.absolute_enable_max_vr_age=.25
+        eye=np.eye(4)
+        bones={i:(eye.copy(),np.zeros(3),np.zeros(3)) for i in (23,4,5)}
+        n.quest3_arm_info_transformer=NS(estimated_bones=bones,init_R_wC=np.eye(3))
+        f=VelocityIkMapperStatus()
+        f.session_bound=f.incremental_geometry_valid=True;f.session_id=f.generation=1
+        f.base_from_chest.orientation.w=1.
+        for i,side in enumerate(('Left','Right')):
+            f.measured_mapper_tcp[i].orientation.w=1.
+            f.measured_mapper_tcp[i].position.x=.30
+            f.measured_mapper_tcp[i].position.y=.22*(1-2*i)
+            f.mapper_link4[i].w=f.base_from_mapper[i].orientation.w=1.
+            f.mapper_shoulder[i].y=.18*(1-2*i);f.arm_reach[i]=.60;f.upper_arm_length[i]=.30
+            f.mapper_elbow[i].x=.05
+            f.mapper_elbow[i].y=.26*(1-2*i)
+            f.mapper_elbow[i].z=.05
+        def step(stamp, grip, elbow):
+            if grip!=n._grips[0]:n._grip_seq[0]+=1;n._grips[0]=grip
+            m=TeleopTcpTarget();m.left_valid=m.right_valid=m.control_valid=True
+            m.session_id=m.generation=1;m.control_state=m.CONTROL_ACTIVE
+            m.header.stamp=rospy.Time.from_sec(stamp)
+            m.left_elbow_hint_valid=True
+            m.left_elbow_hint.x,m.left_elbow_hint.y,m.left_elbow_hint.z=elbow
+            n._fixed_consumer_status=(time.monotonic(),f)
+            n._apply_incremental_target(m)
+            self.assertTrue(m.control_valid)
+            self.assertTrue(m.left_elbow_hint_valid)
+            return np.array(xyz(m.left_elbow_hint))
+        held=np.array([.05,.26,.05])
+        far=np.array([.20,.55,.05])
+        step(1.,False,far)
+        for k in range(1,121):
+            elbow=step(1.+.01*k,True,far)
+        self.assertLess(abs(elbow[1]-held[1]),.16)
+        self.assertGreater(elbow[1],.19)
+        self.assertLess(elbow[1],.40)
+        # An elbow already inside the chest is still pushed out to the clearance.
+        n._clutches[0].elbow=np.array([.05,.02,.05])
+        n._clutches[0].elbow_offset=None
+        inside=step(3.,True,far)
+        self.assertGreaterEqual(inside[1],.19)
+        self.assertLess(inside[1],.40)
+
 
 if __name__=='__main__':
     unittest.main()

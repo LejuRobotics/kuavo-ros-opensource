@@ -4287,6 +4287,7 @@ class IkRos:
             if msg.robot_hold_target[arm]:
                 setattr(msg, elbow_valid, False)
             e = xyz(elbow_msg) if getattr(msg, elbow_valid) else None
+            human_elbow_hint = e is not None
             if clutch.key != key:
                 self._exit_capture[arm] = base[0] @ wrist + base[1]
                 self._next_transfer[arm] = -float("inf")
@@ -4440,6 +4441,17 @@ class IkRos:
                 p, v = self._reach_stops[arm].apply(prior, p, v, wrist,
                     feedback.arm_at_motion_boundary[arm], stamp)
             if engaged and not entering and not rotation_only:
+                # Incremental wrist orientation already keeps a still hand
+                # still. Chasing the absolute human elbow from that fixed
+                # wrist is what drives joints 3/10 and 5/12 to the stop.
+                # Keep the elbow captured at the grip, and let project()
+                # apply only the chest clearance push.
+                prefer_robot_elbow = (human_elbow_hint and clutch.incremental_rotation
+                                      and not modes.transition[arm] and clutch.elbow is not None)
+                if prefer_robot_elbow:
+                    e = clutch.elbow.copy()
+                    clutch.elbow_offset = None
+                    setattr(msg, side + "_elbow_velocity", Vector3())
                 try:
                     p, v, e = self._workspace[arm].project(p, v, e, base, chest, shoulder,
                         max(1.e-6, feedback.arm_reach[arm]-self._reach_margin),
@@ -4448,7 +4460,7 @@ class IkRos:
                     msg.control_valid = False
                     clutch.edge = None
                     return
-                if e is not None and clutch.elbow is not None:
+                if e is not None and clutch.elbow is not None and not prefer_robot_elbow:
                     # Project the human bend first. Projecting the interpolated
                     # hint can amplify a small change at the workspace boundary.
                     if clutch.elbow_offset is None:
