@@ -237,18 +237,6 @@ namespace HighlyDynamic
         }
 
         if (shutdownRequested() || !ros::ok()) return;
-        // Both whole-body IK modes share this hardware startup path. Complete
-        // the hand check before accepting the normal startup confirmation.
-        if (hardware_plant_->end_effector_type_ == "heiman") {
-            static std::atomic<bool> startup_grip_started{false};
-            if (!startup_grip_started.exchange(true) &&
-                !sg100::runStartupGrip(nh_, [this] { return shutdownRequested(); })) {
-                if (shutdownRequested() || !ros::ok()) return;
-                ROS_WARN("SG100 startup grip did not complete; hand control released. "
-                         "Continuing to the normal robot startup confirmation.");
-            }
-        }
-        if (shutdownRequested() || !ros::ok()) return;
         auto real_initial_start_service_ = nh_.advertiseService("/humanoid_controller/real_initial_start", &HardwareNode::realIntialStartCallback, this);
         
         std::string robot_module;
@@ -488,6 +476,18 @@ namespace HighlyDynamic
         if (hardware_param_.cali && !hardware_plant_->is_cali_set_zero_) {
             hardware_plant_->hardware_status_ = -1;
         }
+        // 与常规轮臂一致：手臂先到位，再做黑漫启动抓握。
+        if (shutdownRequested() || !ros::ok()) return;
+        if (hardware_plant_->end_effector_type_ == "heiman") {
+            static std::atomic<bool> startup_grip_started{false};
+            if (!startup_grip_started.exchange(true) &&
+                !sg100::runStartupGrip(nh_, [this] { return shutdownRequested(); })) {
+                if (shutdownRequested() || !ros::ok()) return;
+                ROS_WARN("SG100 startup grip did not complete; hand control released. "
+                         "Continuing to the normal robot startup confirmation.");
+            }
+        }
+        if (shutdownRequested() || !ros::ok()) return;
         std::ostringstream tips_oss;
         bool sit_init_auto_start = false;  // await_start_after_p5=false 时跳过等 'o' 循环
         if (hardware_param_.cali)

@@ -566,6 +566,9 @@ class IkRos:
             self.sg100_gesture_client = Sg100VrGestureClient()
             self.sg100_trigger_pub = rospy.Publisher(
                 "/sg100/mapper_triggers", Vector3Stamped, queue_size=1, tcp_nodelay=True)
+            self._sg100_finger_locked = False
+            self._sg100_y_pressed_last = False
+            self._sg100_frozen_trigger = (0.0, 0.0)
 
         # Callbacks may run immediately after Subscriber construction.  Resolve
         # the end-effector type before registering any callback that reads it.
@@ -4397,7 +4400,10 @@ class IkRos:
         # so a slower hand timer cannot miss it, then suppress duplicate handling.
         if self._torso_controls.source != 'pico':
             return
-        if (hand_msg.left_second_button_pressed and not self.sg100_enabled
+        # 黑漫手的 Y 锁定在同一回调的 _publish_sg100_triggers 里完成，保留这一帧按下沿。
+        if self.sg100_enabled:
+            return
+        if (hand_msg.left_second_button_pressed
                 and self.end_effector_type in (QIANGNAO, QIANGNAO_TOUCH, REVO2, LINKER_HAND, LEJUCLAW)):
             self.__freeze_finger = not self.__freeze_finger
         hand_msg.left_second_button_pressed = False
@@ -4725,14 +4731,37 @@ class IkRos:
                        and self.quest3_arm_info_transformer.left_finger_joints is not None
                        and self.quest3_arm_info_transformer.right_finger_joints is not None
                        and not self.quest3_arm_info_transformer.is_stop_gesture())
+        # 与 Drake 绝对式一致：左手 Y 按下沿锁定当前扳机，再按一次解除。
+        # 锁定期间持续发布按下瞬间的值，并不再切手势。
+        y_pressed = bool(getattr(msg, "left_second_button_pressed", False))
+        toggled = y_pressed and not getattr(self, "_sg100_y_pressed_last", False)
+        self._sg100_y_pressed_last = y_pressed
+        if toggled:
+            self._sg100_finger_locked = not getattr(self, "_sg100_finger_locked", False)
+            if self._sg100_finger_locked:
+                left = float(msg.left_trigger)
+                right = float(msg.right_trigger)
+                if math.isfinite(left) and math.isfinite(right):
+                    self._sg100_frozen_trigger = (
+                        min(1.0, max(0.0, left)), min(1.0, max(0.0, right)))
+            print("\033[91mButton Y is pressed. SG100 finger lock: {}\033[0m".format(
+                "ON" if self._sg100_finger_locked else "OFF"))
+        locked = getattr(self, "_sg100_finger_locked", False)
         values = (msg.left_trigger, msg.right_trigger)
-        if allowed and all(math.isfinite(value) for value in values):
+        if locked and allowed:
+            command.vector.x, command.vector.y = getattr(
+                self, "_sg100_frozen_trigger", (0.0, 0.0))
+            command.vector.z = 1.0
+        elif allowed and all(math.isfinite(value) for value in values):
             command.vector.x, command.vector.y = [min(1.0, max(0.0, v)) for v in values]
             command.vector.z = 1.0
         # Publish revocation as well, so an explicit stop need not await timeout.
         self.sg100_trigger_pub.publish(command)
         if hasattr(self, "sg100_gesture_client"):
-            self.sg100_gesture_client.update(msg, command.vector.z == 1.0)
+            if toggled:
+                self.sg100_gesture_client.update(msg, False)
+            elif not locked:
+                self.sg100_gesture_client.update(msg, command.vector.z == 1.0)
 
     def hand_finger_data_process(self, event):
         if getattr(getattr(self, '_optical_input_guard', None), 'latched', False):

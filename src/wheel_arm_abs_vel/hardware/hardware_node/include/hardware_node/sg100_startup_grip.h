@@ -11,7 +11,7 @@
 
 namespace sg100 {
 
-// Run once before advertising real_initial_start, as in the standard wheel entry.
+// Run once after the arm reaches the prep pose, matching the standard wheel entry.
 // A private callback queue keeps feedback flowing while hardware startup waits.
 inline bool runStartupGrip(ros::NodeHandle nh, const std::function<bool()>& stopped) {
     ros::CallbackQueue queue;

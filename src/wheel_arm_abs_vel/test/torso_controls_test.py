@@ -215,18 +215,23 @@ class ControlsTest(unittest.TestCase):
                 self.assertFalse(p.enabled)
             self.sample(p);self.operate(p);self.assertTrue(p.enabled)
     def test_pico_y_event_is_consumed_before_slow_hand_timer(self):
-        tree=ast.parse((ROOT/'scripts/ik_ros_velocity.py').read_text())
-        cls=next(x for x in tree.body if isinstance(x,ast.ClassDef) and x.name=='IkRos')
-        fn=next(x for x in cls.body if isinstance(x,ast.FunctionDef) and x.name=='_consume_torso_end_effector_edges')
-        env={name:name for name in ('QIANGNAO','QIANGNAO_TOUCH','REVO2','LINKER_HAND','LEJUCLAW')}
-        exec(compile(ast.Module(body=[fn],type_ignores=[]),'<production>','exec'),env)
-        fn=env['_consume_torso_end_effector_edges']
-        for kind in env.copy():
-            if kind not in ('QIANGNAO','QIANGNAO_TOUCH','REVO2','LINKER_HAND','LEJUCLAW'):continue
-            n=NS(_torso_controls=TorsoControls('pico', enable_on_first_follow=False),sg100_enabled=False,end_effector_type=kind,__freeze_finger=False)
-            event=joy(left_second_button_pressed=True);fn(n,event)
-            self.assertTrue(getattr(n,'__freeze_finger'));self.assertFalse(event.left_second_button_pressed)
-            fn(n,event);self.assertTrue(getattr(n,'__freeze_finger'))
+        for path in (ROOT/'scripts/ik_ros_velocity.py',
+                     ROOT/'incremental_velocity/scripts/ik_ros_velocity.py'):
+            tree=ast.parse(path.read_text())
+            cls=next(x for x in tree.body if isinstance(x,ast.ClassDef) and x.name=='IkRos')
+            fn=next(x for x in cls.body if isinstance(x,ast.FunctionDef) and x.name=='_consume_torso_end_effector_edges')
+            env={name:name for name in ('QIANGNAO','QIANGNAO_TOUCH','REVO2','LINKER_HAND','LEJUCLAW')}
+            exec(compile(ast.Module(body=[fn],type_ignores=[]),str(path),'exec'),env)
+            fn=env['_consume_torso_end_effector_edges']
+            for kind in ('QIANGNAO','QIANGNAO_TOUCH','REVO2','LINKER_HAND','LEJUCLAW'):
+                n=NS(_torso_controls=TorsoControls('pico', enable_on_first_follow=False),sg100_enabled=False,end_effector_type=kind,__freeze_finger=False)
+                event=joy(left_second_button_pressed=True);fn(n,event)
+                self.assertTrue(getattr(n,'__freeze_finger'));self.assertFalse(event.left_second_button_pressed)
+                fn(n,event);self.assertTrue(getattr(n,'__freeze_finger'))
+            heiman=NS(_torso_controls=TorsoControls('pico', enable_on_first_follow=False),sg100_enabled=True,end_effector_type='heiman',__freeze_finger=False)
+            event=joy(left_second_button_pressed=True);fn(heiman,event)
+            self.assertFalse(getattr(heiman,'__freeze_finger'))
+            self.assertTrue(event.left_second_button_pressed)
 
     def test_actual_sg100_touch_gate_no_longer_has_a_torso_modifier(self):
         import math

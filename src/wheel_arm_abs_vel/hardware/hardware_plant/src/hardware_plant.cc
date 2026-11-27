@@ -3056,12 +3056,12 @@ bool updateCalibrationStallState(CalibrationStallState& state,
                         const bool heiman_enabled =
                             std::find(end_effector_types.begin(), end_effector_types.end(), EndEffectorType::heiman) != end_effector_types.end();
                         if (heiman_enabled) {
-                            // 左臂 1-7、右臂 8-14：两侧第 4 关节 -90°，第 5 关节 0°。
-                            target_positions[4] = -offset_deg_rad;
-                            target_positions[11] = -offset_deg_rad;
+                            // 左臂 1-7、右臂 8-14：两侧第 4 关节 -45°，第 5 关节 0°。
+                            target_positions[4] = -offset_deg_rad / 2.0f;  // 左臂第 4 关节 -45°，对应电机 0x04
+                            target_positions[11] = -offset_deg_rad / 2.0f; // 右臂第 4 关节 -45°，对应电机 0x0B
                             target_positions[5] = 0.0f;
                             target_positions[12] = 0.0f;
-                            std::cout << "[HWPlantInit] heiman enabled, set initial target positions: motor 0x04/0x0B -> -90 deg, motor 0x05/0x0C -> 0 deg" << std::endl;
+                            std::cout << "[HWPlantInit] heiman enabled, set initial target positions: motor 0x04/0x0B -> -45 deg, motor 0x05/0x0C -> 0 deg" << std::endl;
                         } else {
                             // qibeng 保留原回零姿态：左侧第 5 关节 -90°，右侧 +90°。
                             target_positions[5] = -offset_deg_rad;
