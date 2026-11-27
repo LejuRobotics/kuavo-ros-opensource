@@ -43,7 +43,8 @@ static inline bool isShoulderPitchJoint(int arm_idx)
 }
 
 ArmController::ArmController(ros::NodeHandle& nh, size_t joint_num, size_t joint_waist_num, size_t joint_arm_num,
-                              ocs2::humanoid::TopicLogger* ros_logger)
+                              ocs2::humanoid::TopicLogger* ros_logger,
+                              ExternalHandover external_handover)
   : nh_(nh)
   , ros_logger_(ros_logger)
   , joint_num_(joint_num)
@@ -57,6 +58,7 @@ ArmController::ArmController(ros::NodeHandle& nh, size_t joint_num, size_t joint
   , mode_interpolation_velocity_(1.0)
   , is_interpolating_(false)
   , external_cutoff_freq_(10.0) // 默认10Hz
+  , external_handover_(external_handover)
 {
   // 初始化当前状态
   current_arm_pos_.resize(joint_arm_num);
@@ -1333,9 +1335,23 @@ void ArmController::applyModeChange(int target_mode, bool force_interpolation_to
     }
     resetExternalVelocityDiff();
 
-    // 尚未收到外部目标。切入前缓存的旧遥操姿势不能直接当成新目标。
-    external_target_received_ = false;
-    fresh_external_target_pending_.store(true);
+    bool use_absolute_handover = false;
+    if (external_handover_ == ExternalHandover::kInterpolateAbsoluteTarget &&
+        !isOfflineActionInputActive())
+    {
+      // The VR launch can set this after the controller has started.
+      bool use_incremental_ik = false;
+      ros::param::getCached("/use_cpp_incremental_ik", use_incremental_ik);
+      use_absolute_handover = !use_incremental_ik;
+    }
+
+    // Wait for a target published after this mode change.
+    {
+      std::lock_guard<std::mutex> lock(external_target_mutex_);
+      external_target_received_ = false;
+      absolute_handover_active_.store(use_absolute_handover);
+      fresh_external_target_pending_.store(true);
+    }
     
     // 3. 标记开始插值阶段
     is_interpolating_ = true;
@@ -1548,6 +1564,13 @@ void ArmController::jointStateCallback(const sensor_msgs::JointState::ConstPtr& 
     std::lock_guard<std::mutex> lock(external_target_mutex_);
     if (external_control_pause_requested_.load() ||
         arm_control_mode_ != ControlMode::kExternal || !arm_vr_enabled_) return;
+    // An absolute handover needs a complete setpoint, since unused entries
+    // from the previous session are not valid startup targets.
+    if (absolute_handover_active_.load() &&
+        (msg->name.size() < joint_arm_num_ || msg->position.size() < joint_arm_num_))
+    {
+      return;
+    }
     storeMode2Target(*msg, raw_external_target_q_, raw_external_target_v_);
     external_target_received_ = true;
   }
@@ -1868,6 +1891,8 @@ void ArmController::updateExternalControl(double dt)
 {
   Eigen::VectorXd raw_target_q;
   bool target_received = false;
+  bool absolute_handover_active = false;
+  bool handover_target_accepted = false;
   std::uint64_t owner_epoch = 0;
   {
     // 与输入回调相同的加锁顺序：先 owner，再 target。这样读到的 epoch 和目标属于同一次切换。
@@ -1875,10 +1900,35 @@ void ArmController::updateExternalControl(double dt)
     std::lock_guard<std::mutex> target_lock(external_target_mutex_);
     owner_epoch = external_input_owner_epoch_.load(std::memory_order_acquire);
     target_received = external_target_received_;
+    absolute_handover_active = absolute_handover_active_.load();
     if (target_received)
     {
       raw_target_q = raw_external_target_q_;
+      if (fresh_external_target_pending_.load(std::memory_order_acquire))
+      {
+        // An incremental stream can still be publishing a pose from its previous session.
+        const bool valid_target = raw_target_q.size() == current_arm_pos_.size() &&
+                                  raw_target_q.allFinite() && current_arm_pos_.allFinite();
+        if (!valid_target ||
+            (!absolute_handover_active &&
+             (raw_target_q - current_arm_pos_).lpNorm<Eigen::Infinity>() > 0.35))
+        {
+          external_target_received_ = false;
+          target_received = false;
+        }
+        else
+        {
+          fresh_external_target_pending_.store(false, std::memory_order_release);
+          handover_target_accepted = true;
+        }
+      }
     }
+  }
+  if (handover_target_accepted)
+  {
+    ROS_INFO("[ArmController] %s", absolute_handover_active
+                 ? "Fresh absolute arm target received, starting rate-limited handover"
+                 : "External target matches the current arm pose, start tracking");
   }
   // 输入源切换由回调递增 epoch。这里等到新源的首个目标再作废差分，避免用上一个源的位置。
   if (target_received && owner_epoch != external_velocity_diff_owner_epoch_)
@@ -1889,27 +1939,6 @@ void ArmController::updateExternalControl(double dt)
       arm_joint_vel_filter_.reset(Eigen::VectorXd::Zero(joint_arm_num_));
     }
     external_velocity_diff_owner_epoch_ = owner_epoch;
-  }
-
-  // 旧增量会话会继续发布切走之前的姿势。贴近当前测量才开始跟踪，避免一进外部控制就抬回旧姿势。
-  if (target_received && fresh_external_target_pending_.load(std::memory_order_acquire))
-  {
-    const bool near_current_pose =
-        current_arm_pos_.size() == raw_target_q.size() &&
-        raw_target_q.allFinite() &&
-        (raw_target_q - current_arm_pos_).lpNorm<Eigen::Infinity>() <= 0.35;
-    if (!near_current_pose)
-    {
-      target_received = false;
-      std::lock_guard<std::mutex> input_owner_lock(external_input_owner_mutex_);
-      std::lock_guard<std::mutex> target_lock(external_target_mutex_);
-      external_target_received_ = false;
-    }
-    else
-    {
-      fresh_external_target_pending_.store(false, std::memory_order_release);
-      ROS_INFO("[ArmController] External target matches the current arm pose, start tracking");
-    }
   }
 
   // 外部控制模式
@@ -1980,6 +2009,11 @@ void ArmController::updateExternalControl(double dt)
           external_pause_resume_reacquiring_ = false;
         }
       }
+      else if (absolute_handover_active)
+      {
+        interpolation_finished = applyStrictRateLimitedInterpolation(
+            dt, raw_target_q, mode_interpolation_velocity_);
+      }
       else
       {
         // 收到目标后，向"原始目标"(raw_external_target_q_) 靠拢
@@ -1989,6 +2023,7 @@ void ArmController::updateExternalControl(double dt)
       }
 
       if (interpolation_finished) {
+        absolute_handover_active_.store(false);
           // 插值结束瞬间，重置滤波器到当前位置，确保接管瞬间无跳变。
           // 本拍速度已经用旧历史算过，下一拍差分重新从 0 开始。
           arm_joint_pos_filter_.reset(desire_arm_q_);

@@ -107,6 +107,7 @@ namespace humanoid_controller
     ov::CompiledModel& policyModel() { return compiled_model_; }
     CommandDataRL policyCommand() const { return gait_receiver_->getPolicyCommand(); }
     void publishPolicyObservation(const std::string& field, const Eigen::VectorXd& value);
+    void applyYawCompensation(CommandDataRL& command) const;
 
     // 阻抗控制配置查询（供手臂阻抗服务回调使用）
     bool armImpedanceEnabled() const { return arm_impedance_enabled_; }

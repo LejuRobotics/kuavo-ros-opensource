@@ -74,17 +74,7 @@ defaultBaseXOffsetControl    -0.0        ; Base offset when using RL controller
 ; 不定义全局 autoControllerSwitch，避免覆盖原有 S55 AMP 自动切换配置。
 
 
-; ==================== 原地踏步指令（WAQ 不添加起步偏置） ====================
-inPlaceStepVelocity
-{
-    linearX                      0           ; 原地踏步线速度X
-    linearY                      0           ; 原地踏步线速度Y
-    linearZ                      0           ; 接口留用
-    angularX                     0           ; 接口留用
-    angularY                     0           ; 接口留用
-    angularZ                     0           ; 原地踏步角速度Z
-}
-
+; ==================== 原地踏步指令 ====================
 continuousInPlaceStepVelocity
 {
     linearX                      0           ; 持续原地踏步线速度X
@@ -95,7 +85,7 @@ continuousInPlaceStepVelocity
     angularZ                     0           ; 持续原地踏步角速度Z
 }
 
-; ==================== 指令补偿（WAQ 关闭） ====================
+; ==================== 指令补偿 ====================
 yawCompensation
 {
     enabled                      false       ; 是否启用YAW补偿(true/false)
@@ -120,7 +110,7 @@ yDirectionCompensation
     zBiasRight                   0           ; 向左行走时Z轴角速度偏置(从后往前看) 往左旋转是正
 }
 
-; ==================== 混合运动限制（WAQ 关闭） ====================
+; ==================== 混合运动限制 ====================
 mixedMotionLimits
 {
     enableMixedMode              false       ; 是否启用混合运动模式(true/false)
@@ -129,7 +119,7 @@ mixedMotionLimits
     linearVelThreshold           0.4         ; 线速度阈值 (m/s)
     maxAngularVelWithLinear      0.4         ; 有线速度时最大角速度 (rad/s)
     smoothTransition             false       ; 是否启用平滑过渡(true/false)
-    transitionFactor             0.9         ; 过渡因子
+    transitionFactor             0.9         ; 阈值的起始比例 [0,1]，到阈值时达到完整限幅
 }
 
 stanceToWalkHipRollBias      0.0         ; 初始偏置值（弧度）

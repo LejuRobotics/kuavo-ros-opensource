@@ -2115,7 +2115,9 @@ namespace humanoid_controller
     {
       try
       {
-        arm_controller_ = std::make_unique<ArmController>(nh_, jointNum_, waistNum_, jointArmNum_, ros_logger_);
+        arm_controller_ = std::make_unique<ArmController>(
+            nh_, jointNum_, waistNum_, jointArmNum_, ros_logger_,
+            ArmController::ExternalHandover::kInterpolateAbsoluteTarget);
 
         Eigen::VectorXd arm_kp, arm_kd;
         if (is_roban_)

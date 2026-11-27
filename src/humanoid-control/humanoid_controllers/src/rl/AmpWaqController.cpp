@@ -45,6 +45,9 @@ bool AmpWaqController::loadConfig(const std::string& config_file) {
     ROS_ERROR("[%s] AMP WAQ model must have float32 obs[1,910] -> actions[1,27]", name_.c_str());
     return false;
   }
+  // The receiver is created by AmpWalkController::initialize() on first load.
+  if (auto* receiver = gaitReceiver())
+    receiver->loadInPlaceStepConfig(config_file, false, true);
   history_.reset();
   successful_inference_cycles_ = 0;
   policy_fault_ = false;
@@ -114,6 +117,7 @@ void AmpWaqController::updateObservation(const Eigen::VectorXd&, const SensorDat
     }
     command.scale();
     const bool standing = command.cmdStance_ >= 0.5;
+    if (!standing) applyYawCompensation(command);
     Eigen::Vector3d velocity(command.cmdVelLineX_, command.cmdVelLineY_, command.cmdVelAngularZ_);
     if (standing) velocity.setZero();
     if (sensors.jointPos_.size() < AmpWaqObservation::kJoints ||

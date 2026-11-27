@@ -37,7 +37,7 @@ RlGaitReceiver::RlGaitReceiver(ros::NodeHandle& nh, CommandDataRL* initialComman
   , max_linear_vel_with_angular_(0.5)         // 有角速度时最大线速度默认0.5 m/s
   , linear_vel_threshold_(0.05)              // 线速度阈值默认0.05 m/s
   , max_angular_vel_with_linear_(0.5)         // 有线速度时最大角速度默认0.5 rad/s
-  , smooth_transition_(true)                 // 默认启用平滑过渡
+  , smooth_transition_(false)                // 保留旧控制器的硬限幅
   , transition_factor_(0.8)                   // 默认过渡因子为0.8
   , in_place_step_duration_(2.0)
   , enable_in_place_stepping_(true)
@@ -186,9 +186,9 @@ void RlGaitReceiver::applyWalkingGaitLocked(const std::string& gait_name)
   pending_gait_name_.clear();
   currentCommand_.cmdStance_ = 0.0;
   stance_dwell_gate_.reset();
-  if (gait_name == "trot")
+  if (gait_name == "trot" || continuous_in_place_step_velocity_)
   {
-    trot_latched_ = true;
+    trot_latched_ = gait_name == "trot";
   }
   smart_stop_enabled_ = false;
 }
@@ -323,6 +323,11 @@ void RlGaitReceiver::resetVelocityState()
   last_velocity_update_time_ = ros::Time::now();
   last_cmd_vel_msg_time_ = ros::Time::now();
   stopInPlaceStepping();
+  if (continuous_in_place_step_velocity_)
+  {
+    trot_latched_ = false;
+    smart_stop_enabled_ = true;
+  }
 }
 
 void RlGaitReceiver::setIgnoreTwistCmd(bool ignore)
@@ -471,8 +476,8 @@ void RlGaitReceiver::update(const ros::Time& time, const vector_t& torsostate, c
   }
   
   // Update in-place stepping states
-  bool was_stepping = isInPlaceSteppingActive();
-  if (was_stepping)
+  const bool continuous_stepping = trot_latched_ && continuous_in_place_step_velocity_.has_value();
+  if (!continuous_stepping && isInPlaceSteppingActive())
   {
     updateInPlaceStepping(time);
   }
@@ -503,38 +508,24 @@ void RlGaitReceiver::update(const ros::Time& time, const vector_t& torsostate, c
         std::cout << "[RlGaitReceiver] Smart stop conditions met, switching to stance mode" << std::endl;
       }
     } else {
-      // Smart stop conditions not met, maintain in-place stepping
-      // Use configured in-place stepping velocity
-      if (isInPlaceSteppingActive())
+      if (enable_in_place_stepping_)
       {
-        currentCommand_.cmdVelLineX_ = in_place_step_velocity_.linear.x;
-        currentCommand_.cmdVelLineY_ = in_place_step_velocity_.linear.y;
-        currentCommand_.cmdVelLineZ_ = in_place_step_velocity_.linear.z;
-        currentCommand_.cmdVelAngularX_ = in_place_step_velocity_.angular.x;
-        currentCommand_.cmdVelAngularY_ = in_place_step_velocity_.angular.y;
-        currentCommand_.cmdVelAngularZ_ = in_place_step_velocity_.angular.z;
-        currentCommand_.cmdStance_ = 0; // Keep walking mode for in-place stepping
+        if (!isInPlaceSteppingActive())
+          startInPlaceStepping(time);
+        const auto& velocity = continuous_stepping ? *continuous_in_place_step_velocity_
+                                                    : in_place_step_velocity_;
+        currentCommand_.cmdVelLineX_ = velocity.linear.x;
+        currentCommand_.cmdVelLineY_ = velocity.linear.y;
+        currentCommand_.cmdVelLineZ_ = velocity.linear.z;
+        currentCommand_.cmdVelAngularX_ = velocity.angular.x;
+        currentCommand_.cmdVelAngularY_ = velocity.angular.y;
+        currentCommand_.cmdVelAngularZ_ = velocity.angular.z;
       }
       else
       {
-        // Start in-place stepping if enabled
-        if (enable_in_place_stepping_)
-        {
-          startInPlaceStepping(time);
-          currentCommand_.cmdVelLineX_ = in_place_step_velocity_.linear.x;
-          currentCommand_.cmdVelLineY_ = in_place_step_velocity_.linear.y;
-          currentCommand_.cmdVelLineZ_ = in_place_step_velocity_.linear.z;
-          currentCommand_.cmdVelAngularX_ = in_place_step_velocity_.angular.x;
-          currentCommand_.cmdVelAngularY_ = in_place_step_velocity_.angular.y;
-          currentCommand_.cmdVelAngularZ_ = in_place_step_velocity_.angular.z;
-          currentCommand_.cmdStance_ = 0; // Keep walking mode for in-place stepping
-        }
-        else
-        {
-          currentCommand_.setzero();
-          currentCommand_.cmdStance_ = 0; // Keep walking mode for in-place stepping
-        }
+        currentCommand_.setzero();
       }
+      currentCommand_.cmdStance_ = 0;
       ROS_DEBUG("[RlGaitReceiver] Smart stop conditions not met, maintaining in-place stepping");
     }
   } else {
@@ -1005,33 +996,30 @@ geometry_msgs::Twist RlGaitReceiver::applyMixedMotionLimits(const geometry_msgs:
   double linear_xy_mag = std::sqrt(limited_vel.linear.x * limited_vel.linear.x + 
                                   limited_vel.linear.y * limited_vel.linear.y);
   
-  // Check if we need to limit linear velocity due to angular velocity
-  if (angular_z_mag > angular_vel_threshold_)
+  const auto limit_weight = [this](double speed, double threshold) {
+    if (speed > threshold) return 1.0;
+    if (!smooth_transition_ || threshold <= 0.0 || transition_factor_ >= 1.0) return 0.0;
+    const double start = threshold * transition_factor_;
+    return std::clamp((speed - start) / (threshold - start), 0.0, 1.0);
+  };
+
+  // Smoothly approach each cap below its threshold. At and above the
+  // threshold, the cap still applies in full.
+  const double linear_weight = limit_weight(angular_z_mag, angular_vel_threshold_);
+  if (linear_weight > 0.0 && linear_xy_mag > max_linear_vel_with_angular_)
   {
-    // When there's angular velocity, limit linear velocity to maxLinearVelWithAngular
-    if (linear_xy_mag > max_linear_vel_with_angular_)
-    {
-      double scale_factor = max_linear_vel_with_angular_ / linear_xy_mag;
-      limited_vel.linear.x *= scale_factor;
-      limited_vel.linear.y *= scale_factor;
-      
-      ROS_DEBUG_THROTTLE(1.0, "[RlGaitReceiver] Applied linear velocity limit due to turning: scale=%.2f, angularZ=%.2f, linearXY=%.2f", 
-                         scale_factor, angular_z_mag, linear_xy_mag);
-    }
+    const double scale = (1.0 - linear_weight) +
+                         linear_weight * max_linear_vel_with_angular_ / linear_xy_mag;
+    limited_vel.linear.x *= scale;
+    limited_vel.linear.y *= scale;
   }
   
-  // Check if we need to limit angular velocity due to linear velocity
-  if (linear_xy_mag > linear_vel_threshold_)
+  const double angular_weight = limit_weight(linear_xy_mag, linear_vel_threshold_);
+  if (angular_weight > 0.0 && angular_z_mag > max_angular_vel_with_linear_)
   {
-    // When there's linear velocity, limit angular velocity to maxAngularVelWithLinear
-    if (angular_z_mag > max_angular_vel_with_linear_)
-    {
-      double scale_factor = max_angular_vel_with_linear_ / angular_z_mag;
-      limited_vel.angular.z *= scale_factor;
-      
-      ROS_DEBUG_THROTTLE(1.0, "[RlGaitReceiver] Applied angular velocity limit due to forward movement: scale=%.2f, linearXY=%.2f, angularZ=%.2f", 
-                         scale_factor, linear_xy_mag, angular_z_mag);
-    }
+    const double scale = (1.0 - angular_weight) +
+                         angular_weight * max_angular_vel_with_linear_ / angular_z_mag;
+    limited_vel.angular.z *= scale;
   }
   
   return limited_vel;
@@ -1250,19 +1238,31 @@ geometry_msgs::Twist RlGaitReceiver::smoothPoseCommand(const geometry_msgs::Twis
   return smoothed;
 }
 
-void RlGaitReceiver::loadInPlaceStepConfig(const std::string& config_file, bool verbose)
+void RlGaitReceiver::loadInPlaceStepConfig(const std::string& config_file, bool verbose,
+                                          bool enable_extended_tuning)
 {
   boost::property_tree::ptree pt;
   boost::property_tree::read_info(config_file, pt);
+  std::lock_guard<std::mutex> lock(command_mutex_);
+
+  const auto load_step_velocity = [&](const std::string& section) {
+    geometry_msgs::Twist velocity;
+    loadData::loadPtreeValue(pt, velocity.linear.x, section + ".linearX", verbose);
+    loadData::loadPtreeValue(pt, velocity.linear.y, section + ".linearY", verbose);
+    loadData::loadPtreeValue(pt, velocity.linear.z, section + ".linearZ", verbose);
+    loadData::loadPtreeValue(pt, velocity.angular.x, section + ".angularX", verbose);
+    loadData::loadPtreeValue(pt, velocity.angular.y, section + ".angularY", verbose);
+    loadData::loadPtreeValue(pt, velocity.angular.z, section + ".angularZ", verbose);
+    return velocity;
+  };
+  in_place_step_velocity_ = geometry_msgs::Twist();
+  continuous_in_place_step_velocity_.reset();
+  if (enable_extended_tuning && pt.find("continuousInPlaceStepVelocity") != pt.not_found())
+    continuous_in_place_step_velocity_ = load_step_velocity("continuousInPlaceStepVelocity");
   
   // Load in-place stepping velocity configuration
   if (pt.find("inPlaceStepVelocity") != pt.not_found()) {
-    loadData::loadPtreeValue(pt, in_place_step_velocity_.linear.x, "inPlaceStepVelocity.linearX", verbose);
-    loadData::loadPtreeValue(pt, in_place_step_velocity_.linear.y, "inPlaceStepVelocity.linearY", verbose);
-    loadData::loadPtreeValue(pt, in_place_step_velocity_.linear.z, "inPlaceStepVelocity.linearZ", verbose);
-    loadData::loadPtreeValue(pt, in_place_step_velocity_.angular.x, "inPlaceStepVelocity.angularX", verbose);
-    loadData::loadPtreeValue(pt, in_place_step_velocity_.angular.y, "inPlaceStepVelocity.angularY", verbose);
-    loadData::loadPtreeValue(pt, in_place_step_velocity_.angular.z, "inPlaceStepVelocity.angularZ", verbose);
+    in_place_step_velocity_ = load_step_velocity("inPlaceStepVelocity");
     
     std::cout << "[RlGaitReceiver] inPlaceStepVelocity loaded (" << (is_real_ ? "real robot" : "simulation") << " mode):" << std::endl;
     std::cout << "  linearX: " << in_place_step_velocity_.linear.x << std::endl;
@@ -1273,14 +1273,19 @@ void RlGaitReceiver::loadInPlaceStepConfig(const std::string& config_file, bool 
   }
   
   // Load mixed motion limits parameters
+  enable_mixed_mode_ = false;
+  smooth_transition_ = false;
   if (pt.find("mixedMotionLimits") != pt.not_found()) {
     loadData::loadPtreeValue(pt, enable_mixed_mode_, "mixedMotionLimits.enableMixedMode", verbose);
     loadData::loadPtreeValue(pt, angular_vel_threshold_, "mixedMotionLimits.angularVelThreshold", verbose);
     loadData::loadPtreeValue(pt, max_linear_vel_with_angular_, "mixedMotionLimits.maxLinearVelWithAngular", verbose);
     loadData::loadPtreeValue(pt, linear_vel_threshold_, "mixedMotionLimits.linearVelThreshold", verbose);
     loadData::loadPtreeValue(pt, max_angular_vel_with_linear_, "mixedMotionLimits.maxAngularVelWithLinear", verbose);
-    loadData::loadPtreeValue(pt, smooth_transition_, "mixedMotionLimits.smoothTransition", verbose);
-    loadData::loadPtreeValue(pt, transition_factor_, "mixedMotionLimits.transitionFactor", verbose);
+    if (enable_extended_tuning) {
+      smooth_transition_ = pt.get<bool>("mixedMotionLimits.smoothTransition", false);
+      const double factor = pt.get<double>("mixedMotionLimits.transitionFactor", 0.8);
+      transition_factor_ = std::isfinite(factor) ? std::clamp(factor, 0.0, 1.0) : 1.0;
+    }
     
     ROS_INFO("[RlGaitReceiver] Mixed motion limits loaded: enableMixedMode=%s, maxLinearVelWithAngular=%.2f, maxAngularVelWithLinear=%.2f",
              enable_mixed_mode_ ? "true" : "false", max_linear_vel_with_angular_, max_angular_vel_with_linear_);
@@ -1324,6 +1329,7 @@ void RlGaitReceiver::loadInPlaceStepConfig(const std::string& config_file, bool 
   }
 
   // Load Y direction compensation parameters
+  y_direction_compensation_enabled_ = false;
   if (pt.find("yDirectionCompensation") != pt.not_found()) {
     loadData::loadPtreeValue(pt, y_direction_compensation_enabled_, "yDirectionCompensation.enabled", verbose);
     loadData::loadPtreeValue(pt, y_direction_compensation_x_bias_, "yDirectionCompensation.xBias", verbose);

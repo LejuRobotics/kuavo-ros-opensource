@@ -103,7 +103,8 @@ namespace humanoid_controller
     }
 
     // 加载原地踏步速度配置
-    gait_receiver_->loadInPlaceStepConfig(config_file_, false);
+    gait_receiver_->loadInPlaceStepConfig(
+        config_file_, false, getType() == RLControllerType::AMP_WAQ_CONTROLLER);
 
     // 读取实物/机型参数（与 FallStandController / humanoidController 保持一致）
     if (!nh_.getParam("/is_real", is_real_))
@@ -672,6 +673,7 @@ namespace humanoid_controller
              name_.c_str(), stanceToWalkHipRollBias_, stanceToWalkBiasDuration_);
 
     // 加载YAW补偿参数
+    yaw_compensation_enabled_ = false;
     if (pt.find("yawCompensation") != pt.not_found()) {
       loadData::loadPtreeValue(pt, yaw_compensation_enabled_, "yawCompensation.enabled", false);
       loadData::loadPtreeValue(pt, yaw_compensation_x_bias_, "yawCompensation.xBias", false);
@@ -1490,44 +1492,8 @@ namespace humanoid_controller
     applyLowSpeedKickStart(cmd);
     applyLowSpeedYawKickStart(cmd);
 
-    Eigen::Vector3d velocity_commands;
-    velocity_commands << cmd.cmdVelLineX_,
-                         cmd.cmdVelLineY_,
-                         cmd.cmdVelAngularZ_;
-    // std::cout << "amp vx = " << cmd.cmdVelLineX_ << std::endl;
-        
-    // 应用 YAW 补偿（当旋转时给 X 方向速度添加偏置）
-    if (yaw_compensation_enabled_) {
-      double angular_z = velocity_commands(2);  // YAW角速度
-      double linear_x = velocity_commands(0);   // X方向线速度
-      
-      // 检查是否满足补偿条件：|角速度| > 阈值 且 |线速度| < 阈值
-      if (std::abs(angular_z) > yaw_compensation_threshold_ && 
-          std::abs(linear_x) < yaw_compensation_x_velocity_threshold_) {
-        
-        double x_bias = 0.0;
-        if (yaw_compensation_separate_enabled_) {
-          // 根据旋转方向使用不同的偏置值
-          // angular_z > 0: 逆时针旋转（CCW），angular_z < 0: 顺时针旋转（CW）
-          if (angular_z > 0) {
-            x_bias = yaw_compensation_x_bias_counterclockwise_;
-          } else {
-            x_bias = yaw_compensation_x_bias_clockwise_;
-          }
-        } else {
-          // 使用通用偏置值
-          x_bias = yaw_compensation_x_bias_;
-        }
-        
-        // 应用偏置到X方向速度（同时修改velocity_commands和cmd，确保一致性）
-        velocity_commands(0) += x_bias;
-        cmd.cmdVelLineX_ += x_bias;  // 关键：修改cmd对象，确保getCommandRL()返回补偿后的值
-        
-        // std::cout << "[" << name_ << "] YAW compensation applied: angular_z=" << angular_z
-        //           << ", linear_x=" << linear_x << " -> " << velocity_commands(0)
-        //           << " (bias=" << x_bias << ")" << std::endl;
-      }
-    }
+    applyYawCompensation(cmd);
+    Eigen::Vector3d velocity_commands(cmd.cmdVelLineX_, cmd.cmdVelLineY_, cmd.cmdVelAngularZ_);
 
     prev_raw_cmd_vel_line_x_ = raw_cmd_x_before_kick;
     prev_raw_cmd_vel_angular_z_ = raw_cmd_angz_before_kick;
@@ -1946,6 +1912,20 @@ namespace humanoid_controller
     if (ros_logger_)
     {
       publish_observation("/singleInputData", singleInputData_);
+    }
+  }
+
+  void AmpWalkController::applyYawCompensation(CommandDataRL& command) const
+  {
+    if (yaw_compensation_enabled_ &&
+        std::abs(command.cmdVelAngularZ_) > yaw_compensation_threshold_ &&
+        std::abs(command.cmdVelLineX_) < yaw_compensation_x_velocity_threshold_)
+    {
+      const double directional_bias = command.cmdVelAngularZ_ > 0.0
+                                          ? yaw_compensation_x_bias_counterclockwise_
+                                          : yaw_compensation_x_bias_clockwise_;
+      command.cmdVelLineX_ += yaw_compensation_separate_enabled_
+                                  ? directional_bias : yaw_compensation_x_bias_;
     }
   }
 

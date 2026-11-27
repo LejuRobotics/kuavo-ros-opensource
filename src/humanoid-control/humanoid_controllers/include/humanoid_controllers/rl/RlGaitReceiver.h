@@ -22,6 +22,7 @@ at www.bridgedp.com.
 #include <Eigen/Dense>
 #include "humanoid_controllers/rl/StanceDwellGate.h"
 #include <memory>
+#include <optional>
 
 namespace ocs2
 {
@@ -181,7 +182,8 @@ public:
   geometry_msgs::Twist getSmoothedCmdVel() const;
   
   // Load in-place stepping configuration from config file
-  void loadInPlaceStepConfig(const std::string& config_file, bool verbose = false);
+  void loadInPlaceStepConfig(const std::string& config_file, bool verbose = false,
+                             bool enable_extended_tuning = false);
   bool isInPlaceSteppingActive() const;
   bool isInPlaceWalkingCommand(double linear_thresh, double angular_thresh) const;
 
@@ -299,6 +301,7 @@ private:
   
   // In-place stepping parameters
   geometry_msgs::Twist in_place_step_velocity_;
+  std::optional<geometry_msgs::Twist> continuous_in_place_step_velocity_;
   double in_place_step_duration_;
   bool enable_in_place_stepping_;
   bool is_in_place_stepping_;

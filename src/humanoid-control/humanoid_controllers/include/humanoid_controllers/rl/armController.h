@@ -56,6 +56,12 @@ public:
         kCartesianImpedance = 4  // 笛卡尔空间阻抗控制（末端柔顺）
     };
 
+    enum class ExternalHandover
+    {
+        kRequireAlignedTarget,
+        kInterpolateAbsoluteTarget
+    };
+
     // === 构造/析构 ===
     /**
      * @brief 构造函数
@@ -64,10 +70,12 @@ public:
      * @param joint_waist_num 腰部关节数量
      * @param joint_arm_num 手臂关节数量
      * @param ros_logger ROS日志发布器（可选，用于发布状态信息）
+     * @param external_handover 外部位置目标的接管方式
      * @note 关节排序：腿 + 腰 + 手
      */
     ArmController(ros::NodeHandle& nh, size_t joint_num, size_t joint_waist_num, size_t joint_arm_num,
-                  ocs2::humanoid::TopicLogger* ros_logger = nullptr);
+                  ocs2::humanoid::TopicLogger* ros_logger = nullptr,
+                  ExternalHandover external_handover = ExternalHandover::kRequireAlignedTarget);
     
     /**
      * @brief 析构函数
@@ -633,8 +641,10 @@ private:
     // 由控制线程在新源的首个目标前比较并作废差分历史。
     std::uint64_t external_velocity_diff_owner_epoch_{0};
     bool external_target_received_;      // 是否已收到外部输入
-    // 进入外部控制后，先丢掉与当前手臂差得太远的旧目标，直到出现一帧贴近当前姿势的目标。
+    // 进入外部控制后，等待符合接管条件的新目标。
     std::atomic<bool> fresh_external_target_pending_{false};
+    const ExternalHandover external_handover_;
+    std::atomic<bool> absolute_handover_active_{false};
     Eigen::VectorXd buffered_mode2_target_q_; // 自动切换缓冲期缓存的最新外部目标
     Eigen::VectorXd buffered_mode2_target_v_;
     bool buffered_mode2_target_received_{false};
