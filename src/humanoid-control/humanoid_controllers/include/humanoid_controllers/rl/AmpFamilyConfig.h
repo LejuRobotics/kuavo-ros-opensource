@@ -76,6 +76,8 @@ struct AmpFamilyConfig {
         throw std::invalid_argument("commandThresholdUnits must be ratio or velocity");
       cfg.command_threshold_ratios=units=="ratio";
     }
+    if (sw && sw["directMpcManipulateSwitch"])
+      cfg.direct_mpc_manipulate_switch = sw["directMpcManipulateSwitch"].as<bool>();
     read("walkTorun", cfg.walk_to_run); read("runTowalk", cfg.run_to_walk);
     read("runToWalkSpeedLimit", cfg.run_to_walk_speed_limit);
     read("runMaxAng", cfg.run_max_angular); read("runMinBodySpeed", cfg.run_min_body_speed);

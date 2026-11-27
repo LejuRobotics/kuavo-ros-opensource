@@ -32,13 +32,16 @@ class AmpAssembleController final : public RLControllerBase {
   void resume() override;
   void resumeWarm() override;
   void reset() override;
+  bool supportsDirectMpcManipulateSwitch(const std::string& member_name) const;
+  bool resumeDirectMpcManipulate(const std::string& member_name);
   void advance(bool outer_blend_active);
   bool ownsMember(const std::string&) const;
   std::vector<std::string> getMemberNames() const;
   bool requestMember(const std::string&);
   // nullopt rejects without side effects; otherwise value reports exit readiness.
-  std::optional<bool> requestFamilyExit(bool to_rl = false);
+  std::optional<bool> requestFamilyExit(bool to_rl = false, bool direct_mpc_manipulate = false);
   bool canSwitchToMpc() const;
+  bool directMpcExitIntentStillSafe() const;
   void cancelFamilyExit();
   bool familyExitReady() const;
   void notifyExternalControl();
@@ -97,6 +100,7 @@ class AmpAssembleController final : public RLControllerBase {
   bool updateImpl(const ros::Time&, const SensorData&, const Eigen::VectorXd&, kuavo_msgs::jointCmd&) override;
   void preprocessSensorData(SensorData&) override {} // Child filters exactly once.
  private:
+  void reset(Role initial_role);
   RLControllerBase* child() const { return active_.load(); }
   RLControllerBase* member(Role r) const { return members_[static_cast<size_t>(r)].get(); }
   AmpFamilyPolicy::Input inputSnapshot() const;

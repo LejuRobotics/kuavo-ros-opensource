@@ -27,6 +27,7 @@ class AmpFamilyPolicy {
     std::array<bool, 5> enabled{{true, true, true, true, false}};
     std::array<bool, 5> allow_direct_rl_switch{{true, true, false, true, true}};
     bool command_threshold_ratios = false; // Legacy configs remain in velocity units.
+    bool direct_mpc_manipulate_switch = true;
     double walk_to_run = 1.4;
     double run_to_walk = 1.2;
     double run_to_walk_speed_limit = 0.0; // Forward target before smoothing; 0 disables.
@@ -113,12 +114,14 @@ class AmpFamilyPolicy {
     elbow_since_.reset(); elbow_last_sample_.reset();
     elbow_received_since_.reset(); elbow_last_received_.reset();
   }
-  void reset(double now) {
+  void reset(double now, Role initial_role = Role::Walk) {
     clearElbowGuardHistory();
-    active_ = source_ = Role::Walk;
+    if (!enabled(initial_role)) throw std::invalid_argument("AMP initial role must be enabled");
+    active_ = source_ = initial_role;
     requested_.reset(); candidate_.reset(); run_walk_requested_ = false;
     auto_run_armed_ = true; automatic_run_exit_ = false;
-    blending_ = exiting_ = direct_rl_exit_ = false; last_transition_ = now; status_ = {};
+    blending_ = exiting_ = direct_rl_exit_ = direct_mpc_exit_ = false; last_transition_ = now;
+    status_ = {}; status_.desired = status_.next = initial_role;
   }
   // Manual ring: automatic RUN and action-driven MANIPULATE are not extra slots.
   inline static constexpr std::array<Role, 3> manual_cycle{{Role::Walk, Role::WalkWaq, Role::Soft}};
@@ -140,10 +143,22 @@ class AmpFamilyPolicy {
     requested_ = role; candidate_.reset(); run_walk_requested_ = false;
     return true;
   }
-  void requestExit(bool to_rl = false) { run_walk_requested_ = false; direct_rl_exit_ = to_rl; exiting_ = true; requested_.reset(); candidate_.reset(); }
-  void cancelExit() { if (exiting_) clearElbowGuardHistory(); exiting_ = false; candidate_.reset(); }
+  void requestExit(bool to_rl = false, bool direct_mpc_manipulate = false) {
+    run_walk_requested_ = false;
+    direct_rl_exit_ = to_rl;
+    direct_mpc_exit_ = direct_mpc_manipulate && config_.direct_mpc_manipulate_switch &&
+                       !to_rl && active_ == Role::Manipulate;
+    exiting_ = true;
+    requested_.reset(); candidate_.reset();
+  }
+  void cancelExit() {
+    if (exiting_) clearElbowGuardHistory();
+    exiting_ = direct_rl_exit_ = direct_mpc_exit_ = false;
+    candidate_.reset();
+  }
   bool directRlExit() const { return exiting_ && direct_rl_exit_ && config_.allow_direct_rl_switch[static_cast<size_t>(active_)]; }
-  bool exitReady() const { return exiting_ && (active_ == Role::Walk || directRlExit()) && !blending_; }
+  bool directMpcExit() const { return exiting_ && direct_mpc_exit_ && active_ == Role::Manipulate; }
+  bool exitReady() const { return exiting_ && (active_ == Role::Walk || directRlExit() || directMpcExit()) && !blending_; }
   bool exiting() const { return exiting_; }
   bool blending() const { return blending_; }
   // Selection changes at blend start; the RUN source still executes until completion.
@@ -201,7 +216,7 @@ class AmpFamilyPolicy {
     const bool explicit_request = exiting_ || requested_.has_value();
     const char* idle_reason = "idle";
     if (thermal_exit) { desired = Role::Walk; }
-    else if (exiting_) { desired = directRlExit() ? active_ : Role::Walk; idle_reason = "exit_ready"; }
+    else if (exiting_) { desired = directRlExit() || directMpcExit() ? active_ : Role::Walk; idle_reason = "exit_ready"; }
     else if (external && active_ != Role::Soft) {
       desired = Role::Manipulate;
       // Discard competing requests rather than replaying them after the task.
@@ -348,7 +363,7 @@ class AmpFamilyPolicy {
   Role active_ = Role::Walk;
   Role source_ = Role::Walk;
   std::optional<Role> requested_, candidate_;
-  bool blending_ = false, exiting_ = false, direct_rl_exit_ = false;
+  bool blending_ = false, exiting_ = false, direct_rl_exit_ = false, direct_mpc_exit_ = false;
   bool run_walk_requested_ = false;
   bool auto_run_armed_ = true, automatic_run_exit_ = false;
   double candidate_since_ = 0.0, last_transition_ = 0.0;

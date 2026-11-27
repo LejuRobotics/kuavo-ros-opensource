@@ -292,7 +292,8 @@ namespace humanoid_controller
     void syncEkfFilterProcessing();
 
     // MPC-RL 插值系统函数
-    void startMPCRLInterpolation(double current_time, const vector6_t& target_torso_pose, const vector_t& target_arm_pos);
+    bool startMPCRLInterpolation(double current_time, const vector6_t& target_torso_pose,
+                                const vector_t& target_arm_pos, bool synchronize_posture = true);
     void updateMPCRLInterpolation(double current_time);
     void startTransportMPCInterpolation();
 
@@ -932,10 +933,12 @@ namespace humanoid_controller
     // 6D位姿插值的起点/目标/当前（xyz+rpy）
     vector6_t torso_interpolation_start_pose_;
     vector6_t torso_interpolation_target_pose_;
-    vector_t leg_interpolation_start_pose_;
-    vector_t leg_interpolation_target_pose_;
+    vector_t joint_interpolation_start_pose_;
+    vector_t joint_interpolation_delta_;
     double torso_interpolation_start_time_;
     double torso_interpolation_duration_; // 总期望插值时间 (s)
+    bool synchronize_mpc_rl_posture_{false};
+    vector_t joint_interpolation_velocity_;
     double torso_interpolation_max_velocity_ = 0.1; // 最大插值速度 (m/s)
     double arm_interpolation_max_velocity_ = 1.0; // 最大插值速度 (rad/s)
     vector3_t default_torso_position_; // 默认躯干位置
@@ -1021,9 +1024,7 @@ namespace humanoid_controller
     bool emergency_stop_interpolation_ = false; // 紧急停止插值标志
     double interpolation_start_time_ = 0.0; // 插值开始时间
     double interpolation_duration_ = 1.0;   // 插值持续时间（秒）
-    Eigen::VectorXd arm_interpolation_start_pos_;  // 插值开始时的手臂位置
     Eigen::VectorXd arm_interpolation_start_vel_;  // 插值开始时的手臂速度
-    Eigen::VectorXd arm_interpolation_target_pos_; // 插值目标位置
     Eigen::VectorXd arm_interpolation_target_vel_; // 插值目标速度
     bool last_is_rl_controller_ = false;
 
@@ -1087,8 +1088,8 @@ namespace humanoid_controller
     double rl_to_rl_vmp_amp_target_warmup_duration_ = RL_TO_RL_VMP_AMP_TARGET_WARMUP_DURATION_DEFAULT;
 
     ControllerCmdBlend cmd_blend_;
-    // RL→MPC：cmd_blend 结束后再启动躯干插值（目标复用 torso/arm_interpolation_target_*）
-    bool pending_rl_to_mpc_torso_interp_{false};
+    kuavo_msgs::jointCmd last_published_joint_cmd_;
+    bool mpc_to_amp_blend_pending_{false};
 
     // ==================== 通用插值系统成员变量 ====================
     std::mutex interpolation_mutex_;                                      // 插值任务的线程安全锁
