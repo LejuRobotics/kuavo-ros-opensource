@@ -423,6 +423,11 @@ namespace humanoid_controller
   //waao：控制器切换逻辑
   bool RLControllerManager::switchController(const std::string& name)
   {
+    return switchControllerWithEntryMember(name, {});
+  }
+
+  bool RLControllerManager::switchControllerWithEntryMember(const std::string& name, const std::string& entry_member)
+  {
     std::unique_lock<std::recursive_mutex> lock(mutex_);
     if (const auto family_result = routeAmpFamilySwitchLocked(name))
       return *family_result;
@@ -813,11 +818,20 @@ namespace humanoid_controller
           source_controller_type == RLControllerType::DANCE_CONTROLLER &&
           new_controller->getType() == RLControllerType::AMP_CONTROLLER;
 
-      if (dynamic_cast<AmpAssembleController*>(new_controller))
+      if (auto* family = dynamic_cast<AmpAssembleController*>(new_controller))
       {
-        // Real outer activation always starts at WALK. resumeWarm remains
-        // available to humanoidController for a live blend source only.
-        new_controller->resume();
+        if (!entry_member.empty())
+        {
+          // The target is selected at the actual MPC handoff, after the
+          // physical and arm gates were checked for this request.
+          if (!directMpcManipulateEntryReadyLocked() ||
+              !family->resumeDirectMpcManipulate(entry_member))
+            return false;
+        }
+        else
+        {
+          family->resume();
+        }
         if (!source_is_stance_or_stationary && has_source_gait_command &&
             allow_walking_phase_sync_switch)
           new_controller->setGaitCommandState(source_gait_command);
@@ -2072,6 +2086,9 @@ namespace humanoid_controller
         msg->linear.z * msg->linear.z);
     {
       std::lock_guard<std::recursive_mutex> lock(mutex_);
+      direct_mpc_stopped_command_ =
+          std::hypot(msg->linear.x, msg->linear.y) <= 0.05 && std::abs(msg->linear.z) <= 0.05 &&
+          std::hypot(msg->angular.x, msg->angular.y) <= 0.05 && std::abs(msg->angular.z) <= 0.05;
       if (!auto_switch_config_.enabled)
       {
         return;
@@ -2154,6 +2171,10 @@ namespace humanoid_controller
     const std::string gait_name = msg->data;
     {
       std::lock_guard<std::recursive_mutex> lock(mutex_);
+      if (gait_name == "walk" || gait_name == "trot")
+        direct_mpc_walking_intent_ = true;
+      else if (gait_name == "stance")
+        direct_mpc_walking_intent_ = false;
       if (!auto_switch_config_.enabled)
       {
         return;
@@ -2176,6 +2197,11 @@ namespace humanoid_controller
     if (msg == nullptr || msg->data.empty())
     {
       return;
+    }
+
+    {
+      std::lock_guard<std::recursive_mutex> lock(mutex_);
+      direct_mpc_arm_auto_ready_ = msg->data.size() >= 2 && msg->data[0] == 1.0 && msg->data[1] == 1.0;
     }
 
     constexpr int kExternalArmControlMode = 2;

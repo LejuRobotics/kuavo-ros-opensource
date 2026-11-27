@@ -3993,6 +3993,7 @@ void humanoidController::fillHeadJointCmd(kuavo_msgs::jointCmd& msg, int head_st
       return;
     }
     wbc_ran_this_frame_ = false;  // 本帧复位，endTimer 时置位
+    bool finish_posture_interpolation_after_frame = false;
     uint64_t arm_cmd_frame_epoch = 0;
     {
       std::lock_guard<std::mutex> lock(arm_cmd_stream_mutex_);
@@ -4035,7 +4036,8 @@ void humanoidController::fillHeadJointCmd(kuavo_msgs::jointCmd& msg, int head_st
     controller_manager_->updateSwitchMotionState();
     controller_manager_->processPendingWalkingSwitchRequest();
     controller_manager_->processAutoControllerSwitch(is_torso_interpolation_active_ ||
-                                                     is_rl_to_rl_interpolation_active_);
+                                                     is_rl_to_rl_interpolation_active_ || cmd_blend_.active() ||
+                                                     mpc_to_amp_blend_pending_);
 
     // is_rl_controller_buffer_.updateFromBuffer();// 使用buffer中的值更新is_rl_controller_,避免多线程更新
     is_rl_controller_ = !controller_manager_->isBaseControllerActive();  //waao：判断当前是否为rl
@@ -4162,6 +4164,16 @@ void humanoidController::fillHeadJointCmd(kuavo_msgs::jointCmd& msg, int head_st
       current_arm_vel = jointVelWBC_.segment(jointNumReal_+ waistNum_, armNumReal_);
 
       currentDefalutJointPosRL_ = current_controller_ptr_->getDefaultJointPos();  //waao：读取RL的defaultpos
+      if (currentDefalutJointPosRL_.size() != jointNumReal_ + waistNum_ + armNumReal_ ||
+          !currentDefalutJointPosRL_.allFinite())
+      {
+        ROS_ERROR("[Switch/MPC->RL] invalid default joint posture");
+        haltArmCmdStream();
+        std_msgs::Bool stop_msg;
+        stop_msg.data = true;
+        stop_pub_.publish(stop_msg);
+        return;
+      }
       defaultBaseHeightControl_ = current_controller_ptr_->getDefaultBaseHeightControl();
       std::cout << "last_controller_ptr->getName(): " << current_controller_ptr_->getName() << std::endl;
       std::cout << "New currentDefalutJointPosRL_: " << currentDefalutJointPosRL_.transpose() << std::endl;
@@ -4198,10 +4210,11 @@ void humanoidController::fillHeadJointCmd(kuavo_msgs::jointCmd& msg, int head_st
       targetPose(3) = 0.0;                                     // roll
       targetPose(4) = 0.0;                      // pitch 维持与原逻辑一致
       targetPose(5) = currentObservation_.state(9);                     // yaw 维持与原逻辑一致
-      // 获取当前手臂位置作为目标（保持当前位置）
+      // 躯干和手臂都从当前实测姿态开始过渡。
       stanceState_mrt_ = currentObservation_.state;
       stanceInput_mrt_ = initialInput2WBC_mrt_;
-      startMPCRLInterpolation(currentObservation_.time, targetPose, target_arm_pos);
+      if (!startMPCRLInterpolation(currentObservation_.time, targetPose, target_arm_pos))
+        return;
       resetting_mpc_state_ = ResettingMpcState::RESET_BASE;
 
     }
@@ -4367,34 +4380,17 @@ void humanoidController::fillHeadJointCmd(kuavo_msgs::jointCmd& msg, int head_st
         targetTorsoPose(4) = default_state_(10);
         targetTorsoPose(5) = stanceState_mrt_(9);
         
-        // 修复：切换到RL使用实际手臂位置作为插值目标，而不是默认位置，避免跳变
+        // 手臂目标与当前选定的整机控制器一致。
         vector_t target_arm_pos = defalutArmPosMPC_;
         if (is_rl_controller_)
         {
           target_arm_pos = currentDefalutJointPosRL_.segment(jointNumReal_+ waistNum_, armNumReal_);
         }
 
-        // cmd_blend 仍在跑时先 hold 当前姿态，等 blend 结束后再开躯干插值
-        if (cmd_blend_.active())
-        {
-          torso_interpolation_result_.setZero();
-          torso_interpolation_result_.segment<3>(0) = currentObservation_.state.segment<3>(6);
-          torso_interpolation_result_(3) = currentObservation_.state(9);   // yaw
-          torso_interpolation_result_(4) = currentObservation_.state(10);  // pitch
-          torso_interpolation_result_(5) = 0.0;
-          arm_interpolation_result_ = jointPosWBC_.segment(jointNumReal_ + waistNum_, armNumReal_);
-          leg_interpolation_result_.setZero(waistNum_ + jointNumReal_);
-          leg_interpolation_result_.head(jointNumReal_) = currentObservation_.state.segment(12, jointNumReal_);
-          torso_interpolation_target_pose_ = targetTorsoPose;
-          arm_interpolation_target_pos_ = target_arm_pos;
-          pending_rl_to_mpc_torso_interp_ = true;
-          is_torso_interpolation_active_ = false;
-        }
-        else
-        {
-          pending_rl_to_mpc_torso_interp_ = false;
-          startMPCRLInterpolation(currentObservation_.time, targetTorsoPose, target_arm_pos);
-        }
+        // Pose references start on the same tick as the full-body command
+        // handover. Waiting for cmd_blend_ first made the arms start later.
+        if (!startMPCRLInterpolation(currentObservation_.time, targetTorsoPose, target_arm_pos))
+          return;
       }
       // kuavo_msgs::sensorsData msg = sensors_data_buffer_ptr_->getNextData();
       // // kuavo_msgs::sensorsData msg = sensors_data_buffer_ptr_->getData(ros::Time::now().toSec());
@@ -4424,55 +4420,31 @@ void humanoidController::fillHeadJointCmd(kuavo_msgs::jointCmd& msg, int head_st
             plannedMode_ = ModeNumber::SS;
             if (resetting_mpc_state_ == ResettingMpcState::RESET_BASE)
             {// 插值阶段
-              if (pending_rl_to_mpc_torso_interp_)
+              updateMPCRLInterpolation(currentObservation_.time);
+              if (!is_torso_interpolation_active_)
               {
-                if (!cmd_blend_.active())
+                // 搬运插值完成 → READY（保持 RESET_BASE，继续喂搬运姿态给 MPC）
+                if (transport_mode_state_ == TRANSPORT_INTERPOLATING)
                 {
-                  startMPCRLInterpolation(currentObservation_.time, torso_interpolation_target_pose_,
-                                          arm_interpolation_target_pos_);
-                  pending_rl_to_mpc_torso_interp_ = false;
+                  transport_mode_state_ = TRANSPORT_READY;
+                  ROS_INFO("[HumanoidController] Transport mode READY (posture reached, joints unlocked)");
                 }
-              }
-              else
-              {
-                // 更新躯干插值
-                updateMPCRLInterpolation(currentObservation_.time);
-                // 检查插值是否完成
-                if (!is_torso_interpolation_active_)
+                else if (transport_mode_state_ != TRANSPORT_READY)
                 {
-                  // 搬运插值完成 → READY（保持 RESET_BASE，继续喂搬运姿态给 MPC）
-                  if (transport_mode_state_ == TRANSPORT_INTERPOLATING)
+                  const bool mpc_ready = mrtRosInterface_->initialPolicyReceived() &&
+                                         mrtRosInterface_->updatePolicy() &&
+                                         mrtRosInterface_->isPolicyUpdated() &&
+                                         mrtRosInterface_->getPolicyReceiveCount() > 1;
+                  if (is_rl_controller_ || mpc_ready)
                   {
-                    transport_mode_state_ = TRANSPORT_READY;
-                    ROS_INFO("[HumanoidController] Transport mode READY (posture reached, joints unlocked)");
-                  }
-                  else if (transport_mode_state_ != TRANSPORT_READY)
-                  {
-                  bool mpc_ready = mrtRosInterface_->initialPolicyReceived() &&
-                                            mrtRosInterface_->updatePolicy() &&
-                                            mrtRosInterface_->isPolicyUpdated() &&
-                                            mrtRosInterface_->getPolicyReceiveCount() > 1;
-                  if (is_rl_controller_)// 切换到RL
-                  {
-                    resetting_mpc_state_ = ResettingMpcState::NORMAL;
-                    // 插值阶段直接输出 arm_interpolation_result_，滤波器未随之更新
-                    // 在切到 AMP 前同步滤波器，避免本帧剩余 WBC 流程使用旧 MPC 状态回跳
-                    arm_joint_pos_filter_.reset(arm_interpolation_result_);
-                    arm_joint_vel_filter_.reset(Eigen::VectorXd::Zero(armNumReal_));
-                    // 通知 RL 控制器插值完成（VMP 用此回调启动在线采样）
-                    if (current_controller_ptr_) {
-                      current_controller_ptr_->onInterpolationComplete();
-                    }
-                  }else if (mpc_ready)
-                  {
-                    standupTime_ = currentObservation_.time;
-                    resetting_mpc_state_ = ResettingMpcState::NORMAL;
-                    // 重置手臂滤波器，避免下一帧 MPC 策略输出与滤波器状态不匹配导致 joint_cmd 突变
+                    if (!is_rl_controller_)
+                      standupTime_ = currentObservation_.time;
+                    finish_posture_interpolation_after_frame = true;
+                    // Align the filters with the endpoint while retaining
+                    // RESET_BASE until this complete WBC frame is published.
                     arm_joint_pos_filter_.reset(arm_interpolation_result_);
                     arm_joint_vel_filter_.reset(Eigen::VectorXd::Zero(armNumReal_));
                   }
-                  }
-
                 }
               }
             }
@@ -4507,6 +4479,9 @@ void humanoidController::fillHeadJointCmd(kuavo_msgs::jointCmd& msg, int head_st
             {
               optimizedState_mrt.segment<6>(6) = torso_interpolation_result_;
               optimizedState_mrt.segment(12, jointNumReal_+ waistNum_) = leg_interpolation_result_.head(jointNumReal_+ waistNum_);
+              if (synchronize_mpc_rl_posture_)
+                centroidal_model::getJointVelocities(optimizedInput_mrt, info).head(jointNumReal_ + waistNum_) =
+                    joint_interpolation_velocity_.head(jointNumReal_ + waistNum_);
               plannedMode_ = ModeNumber::SS;
 
             }else if (seat_use_frozen)
@@ -4756,7 +4731,10 @@ void humanoidController::fillHeadJointCmd(kuavo_msgs::jointCmd& msg, int head_st
         if (resetting_mpc_state_ != ResettingMpcState::NORMAL)
         {
           optimizedState2WBC_mrt_.tail(armNumReal_) = arm_interpolation_result_;
-          optimizedInput2WBC_mrt_.tail(armNumReal_).setZero();
+          if (synchronize_mpc_rl_posture_)
+            optimizedInput2WBC_mrt_.tail(armNumReal_) = joint_interpolation_velocity_.tail(armNumReal_);
+          else
+            optimizedInput2WBC_mrt_.tail(armNumReal_).setZero();
         }
         else
         {
@@ -5190,6 +5168,13 @@ void humanoidController::fillHeadJointCmd(kuavo_msgs::jointCmd& msg, int head_st
       {
         std::cout << "HumanoidController::update: pause MPC" << std::endl;
         mrtRosInterface_->pauseResumeMpcNode(true);
+        // The prepared IK pose and the first live AMP policy need not agree.
+        // Continue the entire last emitted WBC command, including torque;
+        // AMP joint_q alone is not its desired joint posture on v55.
+        mpc_to_amp_blend_pending_ = current_controller_ptr_ && !last_published_joint_cmd_.control_modes.empty() &&
+            (current_controller_ptr_->getType() == RLControllerType::AMP_CONTROLLER ||
+             current_controller_ptr_->getType() == RLControllerType::AMP_WAQ_CONTROLLER ||
+             current_controller_ptr_->getType() == RLControllerType::AMP_WILD_IMP_CONTROLLER);
       }
       is_mpc_controller_ = false;
 
@@ -5216,14 +5201,26 @@ void humanoidController::fillHeadJointCmd(kuavo_msgs::jointCmd& msg, int head_st
         {
           updateRLToRLWalkingPhaseSync(currentObservation_.time);
         }
-        if (!buildRLControllerJointCmd(current_controller_ptr_, time, jointCmdMsg))
+        if (!buildRLControllerJointCmd(current_controller_ptr_, time, jointCmdMsg) ||
+            (mpc_to_amp_blend_pending_ && !current_controller_ptr_->isReadyForInterpolation()))
         {
           ROS_ERROR_THROTTLE(1.0, "[RL] Target joint command unavailable; keeping the last valid command");
           stopRLToRLInterpolation();
           is_rl_to_rl_switch = false;
-          if (!has_last_rl_joint_cmd_) return;
-          jointCmdMsg = last_rl_joint_cmd_;
+          if (mpc_to_amp_blend_pending_ && !last_published_joint_cmd_.control_modes.empty())
+            jointCmdMsg = last_published_joint_cmd_;
+          else if (has_last_rl_joint_cmd_)
+            jointCmdMsg = last_rl_joint_cmd_;
+          else
+            return;
           jointCmdMsg.header.stamp = time;
+        }
+        else if (mpc_to_amp_blend_pending_)
+        {
+          // Start the clock only once the complete target command is ready.
+          cmd_blend_.start(currentObservation_.time, last_published_joint_cmd_,
+                           static_cast<size_t>(jointNumReal_ + waistNum_ + armNumReal_), "MPC->AMP");
+          mpc_to_amp_blend_pending_ = false;
         }
       }
 
@@ -5405,6 +5402,7 @@ void humanoidController::fillHeadJointCmd(kuavo_msgs::jointCmd& msg, int head_st
       last_rl_joint_reference_.resize(0);
       last_rl_joint_cmd_ = kuavo_msgs::jointCmd();
       last_rl_controller_name_.clear();
+      mpc_to_amp_blend_pending_ = false;
     }
 
     last_is_rl_controller_ = is_rl_controller_;
@@ -5508,6 +5506,7 @@ void humanoidController::fillHeadJointCmd(kuavo_msgs::jointCmd& msg, int head_st
         ros_logger_->publishValue("/vr_incremental/wbc_processing_latency_ms", wbcProcessingLatencyMs);
       }
     }
+    bool posture_frame_published = false;
     {
       std::lock_guard<std::mutex> lock(arm_cmd_stream_mutex_);
       const bool frame_revoked = arm_cmd_stream_epoch_ != arm_cmd_frame_epoch;
@@ -5533,6 +5532,7 @@ void humanoidController::fillHeadJointCmd(kuavo_msgs::jointCmd& msg, int head_st
         if (!stream_already && still_ultra_fast)
         {
           publishControlCommands(jointCmdMsg);
+          posture_frame_published = true;
         }
       }
       else
@@ -5540,7 +5540,22 @@ void humanoidController::fillHeadJointCmd(kuavo_msgs::jointCmd& msg, int head_st
         arm_cmd_stream_active_ = false;
         arm_cmd_stream_base_valid_ = false;
         publishControlCommands(jointCmdMsg);
+        posture_frame_published = true;
       }
+    }
+    // Keep RESET_BASE through the final WBC frame so neither limbs nor gains
+    // briefly revert to a normal MPC command before the RL handover.
+    if (finish_posture_interpolation_after_frame && posture_frame_published)
+    {
+      resetting_mpc_state_ = ResettingMpcState::NORMAL;
+      if (is_rl_controller_ && current_controller_ptr_)
+        current_controller_ptr_->onInterpolationComplete();
+    }
+    if (posture_frame_published)
+    {
+      last_published_joint_cmd_ = jointCmdMsg;
+      if (is_rl_controller_ && !transport_flow)
+        last_rl_joint_cmd_ = jointCmdMsg;
     }
     {
       robotVisualizer_->updateSimplifiedArmPositions(simplifiedJointPos_);
@@ -7009,90 +7024,110 @@ Eigen::VectorXd humanoidController::getMotionAnchorOriB(const Eigen::Quaterniond
   // 注意：target_torso_pose 输入约定为 [x,y,z, roll,pitch,yaw]，
   // 但 torso_interpolation_result_ 输出到 WBC 时约定为 [x,y,z, yaw,pitch,roll]，
   // 因此代码中会出现 (3)=yaw, (5)=0(roll) 的转换。
-  void humanoidController::startMPCRLInterpolation(double current_time, const vector6_t& target_torso_pose, const vector_t& target_arm_pos)
+  bool humanoidController::startMPCRLInterpolation(double current_time, const vector6_t& target_torso_pose,
+                                                  const vector_t& target_arm_pos, bool synchronize_posture)
   {
-    // 获取当前躯干位姿，输入顺序 [x,y,z, roll,pitch,yaw]
-    vector6_t current_torso_pose = vector6_t::Zero();
-    current_torso_pose.segment<3>(0) = currentObservation_.state.segment<3>(6); // 位置 xyz
-    current_torso_pose(3) = 0.0;                 // roll
-    current_torso_pose(4) = currentObservation_.state(10);  // pitch
-    current_torso_pose(5) = currentObservation_.state(9); // yaw
+    const int body_dof = jointNumReal_ + waistNum_ + armNumReal_;
+    auto reject = [this](const std::string& reason) {
+      ROS_ERROR_STREAM("[Switch/Posture] transition rejected: " << reason);
+      haltArmCmdStream();
+      std_msgs::Bool stop_msg;
+      stop_msg.data = true;
+      stop_pub_.publish(stop_msg);
+      return false;
+    };
+    // Validate the complete snapshot before publishing any new trajectory state.
+    if (!std::isfinite(current_time) || !target_torso_pose.allFinite() ||
+        target_arm_pos.size() != armNumReal_ || !target_arm_pos.allFinite() ||
+        jointPosWBC_.size() < body_dof || !jointPosWBC_.head(body_dof).allFinite() ||
+        currentObservation_.state.size() < 12 + jointNumReal_ ||
+        !currentObservation_.state.allFinite() ||
+        initial_status_.size() < 12 + jointNumReal_)
+      return reject("invalid pose or joint dimensions");
 
-    // WBC 输出 torso_interpolation_result_ 使用 [x,y,z, yaw,pitch,roll]
-    torso_interpolation_result_ = current_torso_pose;
-    torso_interpolation_result_(3) = currentObservation_.state(9);  // yaw
-    torso_interpolation_result_(5) = 0.0;                           // roll
-
-    // 获取当前手臂位置
-    vector_t current_arm_pos = vector_t::Zero(armNumReal_);
-    current_arm_pos = jointPosWBC_.segment(jointNumReal_ + waistNum_, armNumReal_);
-    arm_interpolation_result_ = current_arm_pos;
-
-    // 计算躯干位移距离（仅 xyz 用于限速；xy 锁定为当前值算时长，MPC->RL 仍对完整 target 做 xy 插值）
-    vector3_t target_position_torso = target_torso_pose.segment<3>(0);
-    target_position_torso.head(2) = current_torso_pose.head(2);
-
-    vector3_t current_torso_pos = current_torso_pose.segment<3>(0);
-    double torso_distance = (target_position_torso - current_torso_pos).norm();
-
-    // 计算手臂位移距离
-    double arm_distance = 0.0;
-    if (target_arm_pos.size() == current_arm_pos.size())
+    vector6_t current_torso_pose = vector6_t::Zero();  // [x,y,z, roll,pitch,yaw]
+    current_torso_pose.head<3>() = currentObservation_.state.segment<3>(6);
+    current_torso_pose(4) = currentObservation_.state(10);
+    current_torso_pose(5) = currentObservation_.state(9);
+    const vector_t current_arm_pos = jointPosWBC_.segment(jointNumReal_ + waistNum_, armNumReal_);
+    const vector_t current_leg_pos = jointPosWBC_.head(jointNumReal_);
+    vector_t leg_start, leg_target;
+    try
     {
-      arm_distance = (target_arm_pos - current_arm_pos).norm();
+      // A common measured start prevents a leg-only IK projection on entry.
+      leg_start = synchronize_posture ? current_leg_pos :
+          torso_position_interpolator_ptr_->getlegJointAngles(
+              currentObservation_.state, current_torso_pose, current_leg_pos);
+      // Keep the existing fixed-foot, knee-protected IK for the endpoint.
+      leg_target = torso_position_interpolator_ptr_->getlegJointAngles(
+          currentObservation_.state, target_torso_pose, initial_status_.segment(12, jointNumReal_));
     }
-    else
+    catch (const std::exception& error)
     {
-      ROS_ERROR("[Switch/%s] skip: arm dim mismatch (%zu vs %zu)",
-                is_rl_controller_ ? "MPC->RL" : "RL->MPC",
-                target_arm_pos.size(), current_arm_pos.size());
+      return reject(error.what());
     }
+    if (leg_start.size() != jointNumReal_ || leg_target.size() != jointNumReal_ ||
+        !leg_start.allFinite() || !leg_target.allFinite())
+      return reject("invalid leg IK result");
 
-    // 设置插值参数
-    is_torso_interpolation_active_ = true;
-    last_interpolation_time_ = current_time - 0.01;
+    vector_t joint_start(body_dof), joint_delta(body_dof);
+    joint_start.head(jointNumReal_) = leg_start;
+    joint_start.segment(jointNumReal_, waistNum_) = jointPosWBC_.segment(jointNumReal_, waistNum_);
+    joint_start.tail(armNumReal_) = current_arm_pos;
+    joint_delta.head(jointNumReal_) = leg_target - leg_start;
+    joint_delta.segment(jointNumReal_, waistNum_) = -joint_start.segment(jointNumReal_, waistNum_);
+    joint_delta.tail(armNumReal_) = target_arm_pos - current_arm_pos;
+    if (!joint_start.allFinite() || !joint_delta.allFinite())
+      return reject("invalid MPC/RL joint interpolation");
+
+    const double torso_distance = std::abs(target_torso_pose(2) - current_torso_pose(2));
+    const double arm_distance = joint_delta.tail(armNumReal_).norm();
+    const double torso_speed = std::isfinite(torso_interpolation_max_velocity_) && torso_interpolation_max_velocity_ > 0.0
+        ? torso_interpolation_max_velocity_ : 0.1;
+    const double arm_speed = std::isfinite(arm_interpolation_max_velocity_) && arm_interpolation_max_velocity_ > 0.0
+        ? arm_interpolation_max_velocity_ : 1.0;
+    constexpr double peak_velocity_factor = 1.875;
+    double duration = std::max(torso_distance / torso_speed, arm_distance / arm_speed);
+    if (synchronize_posture)
+      duration *= peak_velocity_factor;
+    duration = std::max(duration, std::max(dt_, 1e-3));
+
+    if (synchronize_posture)
+    {
+      const auto& velocity_limits = kuavo_settings_.hardware_settings.joint_velocity_limits;
+      for (int i = 0; i < body_dof && i < static_cast<int>(velocity_limits.size()); ++i)
+      {
+        const double limit = velocity_limits[i];
+        if (std::isfinite(limit) && limit > 0.0)
+          duration = std::max(duration, peak_velocity_factor * std::abs(joint_delta(i)) / limit);
+      }
+    }
+    if (!std::isfinite(duration) || duration <= 0.0)
+      return reject("invalid MPC/RL posture interpolation");
+
+    // Commit all limbs and the torso together after validation succeeds.
+    synchronize_mpc_rl_posture_ = synchronize_posture;
+    joint_interpolation_start_pose_ = std::move(joint_start);
+    joint_interpolation_delta_ = std::move(joint_delta);
     torso_interpolation_start_pose_ = current_torso_pose;
     torso_interpolation_target_pose_ = target_torso_pose;
-
-    vector_t currentLegJointAngles = currentObservation_.state.segment(12, jointNumReal_);
-    vector_t targetLegJointAngles = initial_status_.segment(12, jointNumReal_);
-
-    leg_interpolation_start_pose_ = torso_position_interpolator_ptr_->getlegJointAngles(currentObservation_.state, current_torso_pose, currentLegJointAngles);
-    leg_interpolation_target_pose_ = torso_position_interpolator_ptr_->getlegJointAngles(currentObservation_.state, target_torso_pose, targetLegJointAngles);
-
-    leg_interpolation_result_.setZero(waistNum_ + jointNumReal_);
-    leg_interpolation_result_.head(jointNumReal_) = leg_interpolation_start_pose_;
-
-    double leg_distance = 0.0;
-    if (leg_interpolation_start_pose_.size() == leg_interpolation_target_pose_.size())
-    {
-      leg_distance = (leg_interpolation_target_pose_ - leg_interpolation_start_pose_).norm();
-    }
-    else
-    {
-      ROS_ERROR("[Switch/%s] skip: leg dim mismatch (%zu vs %zu)",
-                is_rl_controller_ ? "MPC->RL" : "RL->MPC",
-                leg_interpolation_start_pose_.size(), leg_interpolation_target_pose_.size());
-    }
-
-    // torso_interpolation_target_pose_.head(2) = current_torso_pose.head(2);
     torso_interpolation_start_time_ = current_time;
-    
-    // 计算总期望插值时间（基于躯干和手臂的最大距离和最大速度）
-    torso_interpolation_duration_ = torso_distance / torso_interpolation_max_velocity_;
-    double arm_interpolation_duration = arm_distance / arm_interpolation_max_velocity_;
-    torso_interpolation_duration_ = std::max(arm_interpolation_duration, torso_interpolation_duration_);
-
-    // 初始化手臂插值参数
-    arm_interpolation_start_pos_ = current_arm_pos;
-    arm_interpolation_target_pos_ = target_arm_pos;
-
-    // 初始化插值状态变量
+    torso_interpolation_duration_ = duration;
+    torso_interpolation_result_ = current_torso_pose;
+    torso_interpolation_result_(3) = current_torso_pose(5);  // WBC: yaw,pitch,roll
+    torso_interpolation_result_(5) = 0.0;
+    leg_interpolation_result_ = joint_interpolation_start_pose_.head(jointNumReal_ + waistNum_);
+    if (!synchronize_posture)
+      leg_interpolation_result_.tail(waistNum_).setZero();
+    arm_interpolation_result_ = current_arm_pos;
+    joint_interpolation_velocity_ = vector_t::Zero(body_dof);
     last_interpolated_pose_ = current_torso_pose;
-    // last_interpolation_time_ = current_time;
-    ROS_INFO("[Switch/%s] torso %.2fs (t=%.2fm a=%.2frad)",
-             is_rl_controller_ ? "MPC->RL" : "RL->MPC",
-             torso_interpolation_duration_, torso_distance, arm_distance);
+    last_interpolation_time_ = current_time - 0.01;
+    is_torso_interpolation_active_ = true;
+    ROS_INFO("[Switch/%s] synchronized=%d torso %.2fs (t=%.2fm a=%.2frad)",
+             is_rl_controller_ ? "MPC->RL" : "RL->MPC", synchronize_posture,
+             duration, torso_distance, arm_distance);
+    return true;
   }
 
   void humanoidController::updateMPCRLInterpolation(double current_time)
@@ -7101,7 +7136,7 @@ Eigen::VectorXd humanoidController::getMotionAnchorOriB(const Eigen::Quaterniond
       return;
     
     double dt = current_time - last_interpolation_time_;
-    if (dt <= 0.001) // 避免除零和过于频繁的更新
+    if (dt <= (synchronize_mpc_rl_posture_ ? 0.0 : 0.001))
       return;
     
     // 计算目标方向向量（xyz）
@@ -7113,26 +7148,26 @@ Eigen::VectorXd humanoidController::getMotionAnchorOriB(const Eigen::Quaterniond
     double distance_to_target = std::abs(pos_direction[2]);
     // 计算基于时间的插值进度
     double elapsed_time = current_time - torso_interpolation_start_time_;
-    double alpha = std::min(1.0, elapsed_time / torso_interpolation_duration_);
-
-    // 如果已经到达目标位置
-    if (current_time - torso_interpolation_start_time_ >= torso_interpolation_duration_+0.1 && 
-      (distance_to_target < switch_distance_threshold_ || current_time - torso_interpolation_start_time_ > torso_interpolation_duration_ + switch_timeout_base_threshold_))
+    double alpha = std::clamp(elapsed_time / torso_interpolation_duration_, 0.0, 1.0);
+    vector6_t interpolated_pose;
+    const double progress = synchronize_mpc_rl_posture_ ? quinticBlend(alpha) : alpha;
+    interpolated_pose = torso_interpolation_start_pose_ +
+                        progress * (torso_interpolation_target_pose_ - torso_interpolation_start_pose_);
+    leg_interpolation_result_.head(jointNumReal_) =
+        joint_interpolation_start_pose_.head(jointNumReal_) +
+        progress * joint_interpolation_delta_.head(jointNumReal_);
+    arm_interpolation_result_ =
+        joint_interpolation_start_pose_.tail(armNumReal_) +
+        progress * joint_interpolation_delta_.tail(armNumReal_);
+    if (synchronize_mpc_rl_posture_)
     {
-      is_torso_interpolation_active_ = false;
-      is_arm_interpolating_ = false;
-      ROS_INFO("[Switch/%s] torso done %.2fs",
-               is_rl_controller_ ? "MPC->RL" : "RL->MPC",
-               current_time - torso_interpolation_start_time_);
-      return;
+      leg_interpolation_result_.tail(waistNum_) =
+          joint_interpolation_start_pose_.segment(jointNumReal_, waistNum_) +
+          progress * joint_interpolation_delta_.segment(jointNumReal_, waistNum_);
+      const double rate = 30.0 * alpha * alpha * (1.0 - alpha) * (1.0 - alpha) /
+                          torso_interpolation_duration_;
+      joint_interpolation_velocity_ = rate * joint_interpolation_delta_;
     }
-    
-    // 使用线性插值计算当前躯干位姿
-    vector6_t interpolated_pose = torso_interpolation_start_pose_ + alpha * (torso_interpolation_target_pose_ - torso_interpolation_start_pose_);
-    leg_interpolation_result_.head(jointNumReal_) = leg_interpolation_start_pose_ + alpha * (leg_interpolation_target_pose_ - leg_interpolation_start_pose_);
-
-    // 计算手臂插值
-    arm_interpolation_result_ = arm_interpolation_start_pos_ + alpha * (arm_interpolation_target_pos_ - arm_interpolation_start_pos_);
     // 更新位姿和时间
     last_interpolated_pose_ = interpolated_pose;
     last_interpolation_time_ = current_time;
@@ -7145,12 +7180,55 @@ Eigen::VectorXd humanoidController::getMotionAnchorOriB(const Eigen::Quaterniond
     geometry_msgs::Twist twist_msg;
     twist_msg.linear.x = interpolated_pose(0);  // x位置
     twist_msg.linear.y = interpolated_pose(1);  // y位置
-    twist_msg.linear.z = torso_interpolation_target_pose_(2) - default_state_[8];  // z位置与基准高度的差值
-    twist_msg.angular.x = torso_interpolation_target_pose_(3); // roll
-    twist_msg.angular.y = torso_interpolation_target_pose_(4); // pitch
-    twist_msg.angular.z = torso_interpolation_target_pose_(5); // yaw
+    const vector6_t& command_pose = synchronize_mpc_rl_posture_ ? interpolated_pose : torso_interpolation_target_pose_;
+    twist_msg.linear.z = command_pose(2) - default_state_[8];
+    twist_msg.angular.x = command_pose(3); // roll
+    twist_msg.angular.y = command_pose(4); // pitch
+    twist_msg.angular.z = command_pose(5); // yaw
     
     cmdPoseWorldPublisher_.publish(twist_msg);
+
+    // Publish/sample the full endpoint before declaring completion; the last
+    // WBC frame must contain the final pose for both legs and arms.
+    bool interpolation_done = false;
+    if (synchronize_mpc_rl_posture_)
+    {
+      if (elapsed_time >= torso_interpolation_duration_)
+      {
+        const int body_dof = jointNumReal_ + waistNum_ + armNumReal_;
+        const double torso_vz = std::abs(currentObservation_.state(2));
+        const double max_arm_err =
+            armNumReal_ > 0 && jointPosWBC_.size() >= body_dof
+                ? (arm_interpolation_result_ - jointPosWBC_.segment(jointNumReal_ + waistNum_, armNumReal_))
+                      .cwiseAbs()
+                      .maxCoeff()
+                : 0.0;
+        const double max_joint_vel =
+            jointVelWBC_.size() >= body_dof
+                ? jointVelWBC_.head(body_dof).cwiseAbs().maxCoeff()
+                : 0.0;
+        const bool settled = distance_to_target < 0.015 &&
+                             max_arm_err < 0.05 &&
+                             torso_vz < 0.03 &&
+                             max_joint_vel < 0.2;
+        interpolation_done =
+            settled || elapsed_time > torso_interpolation_duration_ + switch_timeout_base_threshold_;
+      }
+    }
+    else
+    {
+      interpolation_done =
+          elapsed_time >= torso_interpolation_duration_ + 0.1 &&
+          (distance_to_target < switch_distance_threshold_ ||
+           elapsed_time > torso_interpolation_duration_ + switch_timeout_base_threshold_);
+    }
+
+    if (interpolation_done)
+    {
+      is_torso_interpolation_active_ = false;
+      is_arm_interpolating_ = false;
+      ROS_INFO("[Switch/%s] torso done %.2fs", is_rl_controller_ ? "MPC->RL" : "RL->MPC", elapsed_time);
+    }
   }
 
 
@@ -8015,7 +8093,7 @@ Eigen::VectorXd humanoidController::getMotionAnchorOriB(const Eigen::Quaterniond
 
     stanceState_mrt_ = currentObservation_.state;
     stanceInput_mrt_ = initialInput2WBC_mrt_;
-    startMPCRLInterpolation(currentObservation_.time, target_torso, target_arm);
+    startMPCRLInterpolation(currentObservation_.time, target_torso, target_arm, false);
     resetting_mpc_state_ = ResettingMpcState::RESET_BASE;
 
 

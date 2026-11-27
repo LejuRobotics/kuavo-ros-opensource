@@ -438,9 +438,15 @@ namespace humanoid_controller
 
   private:
     bool ampMpcSwitchReadyLocked() const;
+    bool ampMpcStationarySampleReadyLocked() const;
+    bool directMpcManipulateEntryReadyLocked() const;
     bool amp_mpc_stationary_ = false;
     ros::Time amp_mpc_sensor_stamp_;
     ros::WallTime amp_mpc_sample_wall_time_;
+    bool direct_mpc_stopped_command_ = false;
+    bool direct_mpc_walking_intent_ = false;
+    bool direct_mpc_arm_auto_ready_ = false;
+    bool switchControllerWithEntryMember(const std::string& name, const std::string& entry_member);
     enum class AutoSwitchCommandBufferType
     {
       NONE,
@@ -709,6 +715,7 @@ namespace humanoid_controller
     bool mpc_is_stance_mode_ = false;               ///< MPC控制器是否处于stance模式
     bool pending_mpc_switch_ = false;               ///< 手臂归位后自动触发MPC切换
     bool pending_amp_family_exit_ = false;         ///< Includes an empty target for MPC.
+    bool pending_direct_mpc_exit_ = false;          ///< Explicit stationary MANIPULATE -> MPC only.
     bool completing_amp_family_exit_ = false;      ///< Only the control cycle commits a queued exit.
     bool outer_blend_active_ = false;
     std::string pending_amp_family_exit_source_name_;

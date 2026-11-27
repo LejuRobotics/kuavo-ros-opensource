@@ -206,7 +206,8 @@ void AmpAssembleController::pause() {
   }
   if (child()) publishStatus(inputSnapshot(), "inactive", true);
 }
-void AmpAssembleController::reset() {
+void AmpAssembleController::reset() { reset(Role::Walk); }
+void AmpAssembleController::reset(Role initial_role) {
   thermal_running_=false; thermal_exit_since_=-1; thermal_timed_out_=false;
   std::lock_guard<std::recursive_mutex> lifecycle_lock(lifecycle_mutex_);
   soft_exit_arm_mode_.reset();
@@ -217,7 +218,7 @@ void AmpAssembleController::reset() {
     elbow_sample_time_ = elbow_received_time_ = 0.0;
   }
   std::lock_guard<std::mutex> lock(policy_mutex_);
-  policy_.reset(ros::Time::now().toSec()); active_.store(member(Role::Walk));
+  policy_.reset(ros::Time::now().toSec(), initial_role); active_.store(member(initial_role));
   pending_pair_ = {}; blend_source_ = nullptr;
   pending_external_mode_ = false;
   external_handoff_pending_ = false;
@@ -228,9 +229,29 @@ void AmpAssembleController::resume() {
   publishMember("", false);
   publishStatus(inputSnapshot(), nullptr, true);
 }
+bool AmpAssembleController::supportsDirectMpcManipulateSwitch(const std::string& member_name) const {
+  const auto* target = member(Role::Manipulate);
+  return policy_.config().direct_mpc_manipulate_switch && target && member_name == target->getName();
+}
+bool AmpAssembleController::resumeDirectMpcManipulate(const std::string& member_name) {
+  std::lock_guard<std::recursive_mutex> lifecycle_lock(lifecycle_mutex_);
+  if (!supportsDirectMpcManipulateSwitch(member_name) || !member(Role::Manipulate)->isInitialized() || isActive())
+    return false;
+  reset(Role::Manipulate);
+  child()->resetGaitCommandState(true);
+  child()->resume();
+  if (!child()->isActive()) {
+    reset();
+    return false;
+  }
+  state_ = ControllerState::RUNNING;
+  publishMember("", false);
+  publishStatus(inputSnapshot(), nullptr, true);
+  return true;
+}
 void AmpAssembleController::resumeWarm() {
   std::lock_guard<std::recursive_mutex> lifecycle_lock(lifecycle_mutex_);
-  // Actual entry uses resume() and resets to WALK. This path revives only a
+  // Ordinary entry uses resume() and resets to WALK. This path revives only a
   // prepared outgoing family for blending; SOFT must not re-enter impedance.
   if (child()->getType() == RLControllerType::AMP_WILD_IMP_CONTROLLER)
     static_cast<AmpFamilyMemberController*>(child())->AmpFamilyMemberController::resumeWarm();
@@ -310,12 +331,22 @@ bool AmpAssembleController::requestMember(const std::string& name) {
   }
   return false;
 }
-std::optional<bool> AmpAssembleController::requestFamilyExit(bool to_rl) {
+std::optional<bool> AmpAssembleController::requestFamilyExit(bool to_rl, bool direct_mpc_manipulate) {
+  AmpFamilyPolicy::Input in;
+  if (direct_mpc_manipulate) {
+    in = inputSnapshot();
+    if (to_rl || in.external_control || in.walking_intent)
+      return std::nullopt;
+  }
   std::lock_guard<std::mutex> lock(policy_mutex_);
   // Check and request under the same lock as transition commit: a concurrent
   // WALK -> RUN must not slip between permission checking and queuing the exit.
   if (policy_.blocksOrdinaryFamilyExit()) return std::nullopt;
-  policy_.requestExit(to_rl);
+  if (direct_mpc_manipulate && (!policy_.config().direct_mpc_manipulate_switch ||
+      policy_.activeRole() != Role::Manipulate || policy_.blending() ||
+      child() != member(Role::Manipulate) || child()->hasActiveArmActionSession()))
+    return std::nullopt;
+  policy_.requestExit(to_rl, direct_mpc_manipulate);
   if (!policy_.directRlExit()) walking_allowed_ = false;
   external_allowed_ = false;
   external_handoff_pending_ = pending_external_mode_ = false;
@@ -330,6 +361,11 @@ void AmpAssembleController::cancelFamilyExit() {
 }
 bool AmpAssembleController::familyExitReady() const {
   std::lock_guard<std::mutex> lock(policy_mutex_);
+  if (policy_.directMpcExit()) {
+    const auto in = inputSnapshot();
+    if (in.external_control || in.walking_intent || child()->hasActiveArmActionSession())
+      return false;
+  }
   const auto* arm = child()->getArmController();
   return policy_.exitReady() && (!arm || (arm->getMode() == 1 &&
       !arm->isImpedanceHandoverActive() && !arm->isHomingToDefault() &&
@@ -348,6 +384,16 @@ bool AmpAssembleController::canSwitchToMpc() const {
           std::abs(command_.angular.z) <= 0.05)) return false;
   }
   return child() && child()->isAllowToExit() && child()->hasNearZeroGaitCommand(0.05, 0.05);
+}
+bool AmpAssembleController::directMpcExitIntentStillSafe() const {
+  std::lock_guard<std::mutex> lock(policy_mutex_);
+  if (!policy_.directMpcExit() || policy_.blending() ||
+      child() != member(Role::Manipulate) || child()->hasActiveArmActionSession())
+    return false;
+  const auto in = inputSnapshot();
+  return !in.external_control && !in.walking_intent &&
+         std::hypot(in.command_x, in.command_y) <= 0.05 &&
+         std::abs(in.command_yaw) <= 0.05;
 }
 void AmpAssembleController::refreshCommandGates(const AmpFamilyPolicy::Input& in) {
   std::lock_guard<std::mutex> lock(policy_mutex_);

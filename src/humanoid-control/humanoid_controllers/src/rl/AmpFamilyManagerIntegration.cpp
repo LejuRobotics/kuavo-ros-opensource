@@ -1,5 +1,6 @@
 // Pinocchio must be included before Boost headers.
 #include <pinocchio/fwd.hpp>
+#include <cmath>
 #include "humanoid_controllers/rl/RLControllerManager.h"
 #include "humanoid_controllers/rl/AmpAssembleController.h"
 
@@ -38,6 +39,7 @@ namespace humanoid_controller
           family->cancelFamilyExit();
     }
     pending_amp_family_exit_ = false;
+    pending_direct_mpc_exit_ = false;
     pending_amp_family_exit_source_name_.clear();
     pending_amp_family_exit_target_name_.clear();
   }
@@ -47,16 +49,30 @@ namespace humanoid_controller
     const std::string resolved_name = resolveControllerNameLocked(name);
     if (resolved_name != name)
     {
-      // Activate the family root first, then request its member. A deferred
-      // VMP handoff keeps the requested member until that root is activated.
-      if (current_controller_name_ != resolved_name && !switchController(resolved_name))
+      auto* target_family = dynamic_cast<AmpAssembleController*>(controllers_.at(resolved_name).get());
+      const bool direct_entry = current_controller_name_.empty() && target_family &&
+          target_family->supportsDirectMpcManipulateSwitch(name);
+      if (direct_entry && !directMpcManipulateEntryReadyLocked())
+      {
+        logSwitchBlocked("MPC->MANIPULATE requires fresh stationary stance, zero command, and settled automatic arms");
         return false;
+      }
+      // A stationary MPC request can activate MANIPULATE at the outer handoff.
+      // Other requests activate the family root before routing the member.
+      if (current_controller_name_ != resolved_name)
+      {
+        const bool activated = switchControllerWithEntryMember(resolved_name, direct_entry ? name : std::string());
+        if (!activated)
+          return false;
+      }
       if (current_controller_name_ != resolved_name)
       {
         pending_amp_member_request_ = name;
         pending_amp_member_target_name_ = resolved_name;
         return true;
       }
+      if (direct_entry)
+        return target_family->activeMemberName() == name;
       auto* family = currentAmpFamilyLocked();
       if (!family)
         return false;
@@ -108,10 +124,19 @@ namespace humanoid_controller
           // Reject atomically before creating pending state or closing command
           // gates. Covers next/previous, named and navigation requests. Emergency
           // FallStand above and family-internal member routing remain available.
-          const auto ready = family->requestFamilyExit(!name.empty());
+          const bool direct_mpc_exit = name.empty() &&
+              family->supportsDirectMpcManipulateSwitch(family->activeMemberName());
+          if (completing_amp_family_exit_ && pending_direct_mpc_exit_ && !direct_mpc_exit)
+          {
+            clearPendingAmpFamilyExitLocked(true);
+            return false;
+          }
+          const auto ready = family->requestFamilyExit(!name.empty(), direct_mpc_exit);
           if (!ready.has_value())
           {
-            logSwitchBlocked("AMP RUN/retirement blend blocks ordinary family exit; retire to WALK first, then request again");
+            logSwitchBlocked(direct_mpc_exit
+                ? "AMP->MPC direct exit requires MANIPULATE with no active walking, arm action, or external control"
+                : "AMP RUN/retirement blend blocks ordinary family exit; retire to WALK first, then request again");
             return false;
           }
           if (pending_amp_family_exit_ && pending_amp_family_exit_target_name_ != name)
@@ -120,11 +145,14 @@ namespace humanoid_controller
             clearPendingWalkingSwitchRequest("superseded AMP family exit");
           }
           pending_amp_family_exit_ = true;
+          pending_direct_mpc_exit_ = direct_mpc_exit;
           pending_amp_family_exit_source_name_ = current_controller_name_;
           pending_amp_family_exit_target_name_ = name;
           // Keep the target until member routing and arm preparation complete.
           // Direct RL exits retain the current member; MPC keeps its own gate.
           if (!completing_amp_family_exit_ || !*ready || outer_blend_active_)
+            return true;
+          if (direct_mpc_exit && !family->familyExitReady())
             return true;
           if (!allowWalkingPhaseSyncSwitchRequest(name) && !isTorsoVelocityStable())
             return true;
@@ -151,6 +179,13 @@ namespace humanoid_controller
       std::lock_guard<std::recursive_mutex> lock(mutex_);
       if (currentAmpFamilyLocked() != family)
         return true;
+      if (pending_direct_mpc_exit_ &&
+          (!ampMpcSwitchReadyLocked() || !family->directMpcExitIntentStillSafe()))
+      {
+        clearPendingAmpFamilyExitLocked(true);
+        pending_mpc_switch_ = false;
+        return true;
+      }
       if (pending_amp_family_exit_ && !pending_mpc_switch_ && !outer_blend_active &&
           pending_amp_family_exit_source_name_ == current_controller_name_ &&
           family->familyExitReady())
@@ -200,14 +235,32 @@ namespace humanoid_controller
     }
   }
 
-  bool RLControllerManager::ampMpcSwitchReadyLocked() const
+  bool RLControllerManager::ampMpcStationarySampleReadyLocked() const
   {
-    const auto* family = currentAmpFamilyLocked();
     // sensor_time is an open-loop 1 ms integrator and drifts away from ros::Time.
     // A changed stamp refreshes the wall clock, so this still rejects a frozen sample.
     const bool fresh = !amp_mpc_sensor_stamp_.isZero() && !amp_mpc_sample_wall_time_.isZero() &&
         (ros::WallTime::now() - amp_mpc_sample_wall_time_).toSec() <= 0.1;
-    return family && !outer_blend_active_ && family->canSwitchToMpc() && fresh && amp_mpc_stationary_;
+    return fresh && amp_mpc_stationary_;
+  }
+
+  bool RLControllerManager::directMpcManipulateEntryReadyLocked() const
+  {
+    return current_controller_name_.empty() && !outer_blend_active_ &&
+        !pending_vmp_to_amp_switch_ && !pending_arm_prepared_switch_ &&
+        !pending_mpc_switch_ && !pending_amp_family_exit_ &&
+        mpc_is_stance_mode_ && mpc_current_gait_name_ == "stance" &&
+        !direct_mpc_walking_intent_ &&
+        direct_mpc_arm_auto_ready_ && direct_mpc_stopped_command_ &&
+        !isRobotActionActiveForAutoSwitchLocked(ros::Time::now()) &&
+        ampMpcStationarySampleReadyLocked();
+  }
+
+  bool RLControllerManager::ampMpcSwitchReadyLocked() const
+  {
+    const auto* family = currentAmpFamilyLocked();
+    return family && !outer_blend_active_ && family->canSwitchToMpc() &&
+        ampMpcStationarySampleReadyLocked();
   }
 
   bool RLControllerManager::logAmpFamilyExitRetry(const std::string& message) const
