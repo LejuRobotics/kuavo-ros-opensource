@@ -10,18 +10,21 @@ struct VelocityIkOfflineTest {
     if (!condition) throw std::runtime_error(message);
   }
   static void run(PinocchioVelocityIk& n) {
-    initializeAbsoluteRecording(n.nh_, n.legacy_lower_record_pub_,
-                                n.legacy_eef_record_pub_, n.legacy_input_record_pub_);
-    n.legacy_arm_record_pub_ = n.nh_.advertise<sensor_msgs::JointState>("/whole_body_velocity_ik/record/kuavo_arm_traj", 2);
+    n.initializeRecording();
     kuavo_msgs::twoArmHandPose eef;
     kuavo_msgs::Float32MultiArrayStamped input;
+    sensor_msgs::JointState arm_sample, lower_sample;
     int eef_count = 0;
     std::atomic<int> input_count{0};
     std::vector<ros::Subscriber> subscriptions;
-    subscriptions.push_back(n.nh_.subscribe<kuavo_msgs::twoArmHandPose>("/whole_body_velocity_ik/record/drake_ik/eef_pose", 10,
+    subscriptions.push_back(n.nh_.subscribe<kuavo_msgs::twoArmHandPose>("/drake_ik/eef_pose", 10,
         [&](const kuavo_msgs::twoArmHandPose::ConstPtr& m) { eef = *m; ++eef_count; }));
-    subscriptions.push_back(n.nh_.subscribe<kuavo_msgs::Float32MultiArrayStamped>("/whole_body_velocity_ik/record/drake_ik/input_pos", 10,
+    subscriptions.push_back(n.nh_.subscribe<kuavo_msgs::Float32MultiArrayStamped>("/drake_ik/input_pos", 10,
         [&](const kuavo_msgs::Float32MultiArrayStamped::ConstPtr& m) { input = *m; ++input_count; }));
+    subscriptions.push_back(n.nh_.subscribe<sensor_msgs::JointState>("/kuavo_arm_traj", 10,
+        [&](const sensor_msgs::JointState::ConstPtr& m) { arm_sample = *m; }));
+    subscriptions.push_back(n.nh_.subscribe<sensor_msgs::JointState>("/lb_leg_traj", 10,
+        [&](const sensor_msgs::JointState::ConstPtr& m) { lower_sample = *m; }));
     auto measured = Eigen::VectorXd::Zero(n.decisionDofCount()).eval();
     measured(n.baseDecisionIndex(0)) = 1.2;
     measured(n.baseDecisionIndex(1)) = -.3;
@@ -69,6 +72,15 @@ struct VelocityIkOfflineTest {
       ros::spinOnce(); ros::WallDuration(.02).sleep();
     }
     ros::spinOnce();
+    const auto matches_record = [&](const sensor_msgs::JointState& received,
+                                    const sensor_msgs::JointState& converted) {
+      return received.header.frame_id == wheel_arm_abs_vel::arm_record::kFrameId &&
+             received.header.stamp == header.stamp && received.name == converted.name &&
+             received.position == converted.position && received.velocity == converted.velocity &&
+             received.effort == converted.effort;
+    };
+    require(matches_record(arm_sample, arm_message) && matches_record(lower_sample, lower_message),
+            "public trajectory sample differs from recording conversion");
     require(eef_count > 0 && input_count.load() > 0, "missing combined pose publication");
     require(input.data.data.size() == 14, "input pose size");
     require(eef.header.frame_id == n.base_frame_name_ && input.header.frame_id == n.base_frame_name_, "frame mismatch");
@@ -94,10 +106,16 @@ struct VelocityIkOfflineTest {
     }
     ros::master::V_TopicInfo topics;
     require(ros::master::getTopics(topics), "master topic query failed");
+    const auto has_topic = [&](const std::string& name) {
+      return std::any_of(topics.begin(), topics.end(), [&](const ros::master::TopicInfo& topic) {
+        return topic.name == name;
+      });
+    };
+    for (const std::string name : {"/kuavo_arm_traj", "/lb_leg_traj", "/drake_ik/eef_pose", "/drake_ik/input_pos"}) {
+      require(has_topic(name) && has_topic("/whole_body_velocity_ik/record" + name), "missing recording topic");
+    }
     for (const auto& topic : topics)
-      require(topic.name.find("/ik_fk_result/") != 0 && topic.name != "/kuavo_arm_traj_sensor_data" &&
-              topic.name != "/kuavo_arm_traj" && topic.name != "/lb_leg_traj" &&
-              topic.name != "/drake_ik/eef_pose" && topic.name != "/drake_ik/input_pos",
+      require(topic.name.find("/ik_fk_result/") != 0 && topic.name != "/kuavo_arm_traj_sensor_data",
               "unexpected incremental compatibility publisher");
     const int previous_input_count = input_count.load();
     target.valid = false;

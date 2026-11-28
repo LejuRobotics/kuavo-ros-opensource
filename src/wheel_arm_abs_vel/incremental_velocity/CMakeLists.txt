@@ -1,8 +1,8 @@
-add_executable(pinocchio_incremental_velocity_ik_node src/pinocchio_velocity_ik_node.cpp)
+add_executable(pinocchio_incremental_velocity_ik_node src/pinocchio_velocity_ik_node.cpp src/dagger_candidate.cpp)
 target_include_directories(pinocchio_incremental_velocity_ik_node PRIVATE
   ../include ../velocity_ik
   ${VELOCITY_IK_MESSAGE_INCLUDE} ${catkin_INCLUDE_DIRS})
-target_link_libraries(pinocchio_incremental_velocity_ik_node PRIVATE velocity_ik_model velocity_ik_qp ${catkin_LIBRARIES})
+target_link_libraries(pinocchio_incremental_velocity_ik_node PRIVATE velocity_ik_model velocity_ik_qp nlohmann_json::nlohmann_json ${catkin_LIBRARIES})
 add_dependencies(pinocchio_incremental_velocity_ik_node ${VELOCITY_IK_MESSAGE_TARGETS})
 install(TARGETS pinocchio_incremental_velocity_ik_node RUNTIME DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION})
 catkin_install_python(PROGRAMS scripts/run_incremental_velocity.py scripts/run_incremental_dual_quest.py DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION})

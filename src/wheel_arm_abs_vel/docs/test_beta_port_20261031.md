@@ -16,7 +16,7 @@ MR !4194 以 beta `2e5f9d821` 为基线。复核后按用户要求收紧：最�
 | --- | --- |
 | 输入与 QP | 双手 TCP native Kalman、胸相对肘 40 ms EMA、同源预测、clean10 默认 10/8 Hz、独立 QP 验收；保留硬限位、SHM、执行握手和传感器新鲜度保护。旧 skeleton/flattening 实验声明仅作 launch 兼容。 |
 | 躯干 | 两级摇杆、操作序号、位置重新锚定和当日统一 control_torso。 |
-| 录包 | 保留原消息结构和 record-only 标记，新增输出只发往 `/whole_body_velocity_ik/record/` 下的 `kuavo_arm_traj`、`lb_leg_traj`、`drake_ik/eef_pose`、`drake_ik/input_pos`；私有录包脚本显式订阅，避免公共轨迹被增量接收端执行。 |
+| 录包 | 绝对式录包器订阅 `/kuavo_arm_traj`、`/lb_leg_traj`、`/drake_ik/eef_pose` 和 `/drake_ik/input_pos`。原 `/whole_body_velocity_ik/record/` 前缀继续提供同一帧数据。轨迹位置以度、速度以度/秒表示，控制接收端通过 `whole_body_ik_record_only` 标记跳过录制帧。 |
 | 模型与运动限制 | 私有 wheel_arm_gains、S6 限制及完整模型契约；共享资产只读，保留 beta 私有限位交集和 S63 路径。取消白名单不等于全部型号实机适配。 |
 | 诊断 | 保留 beta 已有后台参数线程与亲和性，启动时预分配耗时发布器/消息，增加阶段/查询耗时和动力学失败信息；不放宽 dt/测量过期保护。 |
 | 头跟手 | 私有 absolute_head_control_node 继承 beta 公共节点，仅替换活动量估计和偏置算法；fixed/vr_follow/track_hand 生命周期、服务、超时与头部安全限位继续来自 beta。只改绝对式 launch。 |

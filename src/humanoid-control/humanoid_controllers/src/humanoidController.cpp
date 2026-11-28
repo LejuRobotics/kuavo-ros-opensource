@@ -1,4 +1,5 @@
 #include <pinocchio/fwd.hpp> // forward declarations must be included first.
+#include <kuavo_msgs/whole_body_ik_record.h>
 #include <pinocchio/algorithm/frames.hpp>
 #include <pinocchio/algorithm/kinematics.hpp>
 #include "std_srvs/SetBool.h"
@@ -1657,6 +1658,7 @@ namespace humanoid_controller
 
     auto jointStateCallback = [this](const sensor_msgs::JointState::ConstPtr& msg)
     {
+      if (msg && msg->header.frame_id == kuavo_msgs::kWholeBodyIkRecordFrame) return;
       if( is_rl_controller_ == true)
       {
         // std::cout << "jointStateCallback" << std::endl;

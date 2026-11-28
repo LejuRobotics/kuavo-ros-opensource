@@ -4,13 +4,14 @@
 #include <cmath>
 #include <utility>
 #include <sensor_msgs/JointState.h>
+#include <kuavo_msgs/whole_body_ik_record.h>
 #include <wheel_arm_abs_vel/WholeBodyIkReference.h>
 
 namespace wheel_arm_abs_vel {
 namespace arm_record {
 
 // Legacy topic format for recording only. Command receivers must ignore it.
-constexpr char kFrameId[] = "whole_body_ik_record_only";
+static constexpr auto& kFrameId = kuavo_msgs::kWholeBodyIkRecordFrame;
 
 inline bool convertJoints(const WholeBodyIkReference& reference,
                           const std::vector<std::string>& names,

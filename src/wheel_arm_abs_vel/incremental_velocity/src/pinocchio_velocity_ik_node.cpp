@@ -1,4 +1,6 @@
 #include <wheel_arm_abs_vel/motion_capture_ik/S6MotionProfile.h>
+#include "dagger_candidate.h"
+#include "dagger_tracking.h"
 #include "wheel_arm_abs_vel/model/FullModelContract.h"
 #include "wheel_arm_abs_vel/humanoid_controllers/ExecutionProducerLease.h"
 #include "wheel_arm_abs_vel/humanoid_controllers/ClockedReferenceFreshness.h"
@@ -201,6 +203,26 @@ class PinocchioVelocityIk {
     std::cout << "MODEL=PINOCCHIO IK_LEVEL=VELOCITY QP=WEIGHTED_SINGLE SOLVER=PROXQP ELBOW=XYZ_SOFT SEW=OFF HQP=OFF SQP=OFF REFERENCE=D_STYLE_TRAPEZOIDAL" << std::endl;
 
 #ifndef VELOCITY_IK_OFFLINE_TEST
+    if (pnh_.param("dagger_candidate_only", false)) {
+      if (!incremental_geometry_ || enable_base_motion_) {
+        throw std::runtime_error("DAgger requires wheel incremental IK with a fixed base");
+      }
+      pnh_.param("dagger_fixed_lower_seed_tolerance_rad", dagger_seed_tolerance_, .005);
+      pnh_.param("dagger_qp_grace_ticks", dagger_grace_ticks_, 2);
+      pnh_.param("dagger_use_adaptive_bandwidth", dagger_adaptive_, true);
+      pnh_.param("dagger_hand_position_cutoff_hz", dagger_position_fast_hz_, 10.);
+      pnh_.param("dagger_hand_orientation_cutoff_hz", dagger_orientation_fast_hz_, 8.);
+      if (!std::isfinite(dagger_seed_tolerance_) || dagger_seed_tolerance_ < 0. ||
+          dagger_grace_ticks_ < 0 || dagger_grace_ticks_ > 2 ||
+          !std::isfinite(dagger_position_fast_hz_) || dagger_position_fast_hz_ <= 0. ||
+          !std::isfinite(dagger_orientation_fast_hz_) || dagger_orientation_fast_hz_ <= 0.)
+        throw std::runtime_error("Invalid DAgger seed, QP grace or bandwidth");
+      dagger_.reset(new velocity_ik::DaggerCandidate(nh_, pnh_));
+      robot_state_sub_ = nh_.subscribe(robot_state_topic_, 2, &PinocchioVelocityIk::robotStateCallback,
+                                       this, ros::TransportHints().tcpNoDelay());
+      // Return before configuring the producer lease, SHM writer or any control publishers.
+      return;
+    }
     if (use_controller_startup_arm_pose_) {
       controller_startup_arm_pose_sub_ = nh_.subscribe(
           "/whole_body_velocity_ik/controller_startup_arm_pose", 1,
@@ -377,6 +399,18 @@ class PinocchioVelocityIk {
   }
 
   void run() {
+#ifndef VELOCITY_IK_OFFLINE_TEST
+    if (dagger_) {
+      velocity_ik::configureIkThread();
+      ros::WallRate rate(solver_rate_hz_);
+      while (ros::ok()) {
+        ros::spinOnce();
+        publishDaggerCandidate();
+        rate.sleep();
+      }
+      return;
+    }
+#endif
     ros::AsyncSpinner spinner(2);
     spinner.start();
     startFeasibilityWorker();
@@ -536,6 +570,7 @@ class PinocchioVelocityIk {
 
   struct SolverRequest {
     bool manual_lower{false};
+    bool dagger_brake_on_failure{false};
     uint64_t diagnostic_tick{0};
     bool catchup_correction=false;
     double acquisition_blend=1.;
@@ -602,6 +637,7 @@ class PinocchioVelocityIk {
 
   struct SolverCandidate {
     bool joint_jerk_active=false, joint_jerk_retry=false;
+    bool dagger_brake_feasible=false;
     bool diagnostics_due=false;
     bool jerk_diagnostics_due=false;
     int joint_jerk_first_code=0;
@@ -1540,9 +1576,12 @@ class PinocchioVelocityIk {
       }
     }
     bool s6_profile_enabled = false;
-    pnh_.param("s6_motion_profile/enabled", s6_profile_enabled, false);
+    const bool paired = pnh_.param("dagger_candidate_only", false) &&
+        nh_.hasParam("/vr_ik/s6_motion_profile/enabled");
+    const ros::NodeHandle profile_node(paired ? "/vr_ik/s6_motion_profile" :
+                                       pnh_.resolveName("s6_motion_profile"));
+    profile_node.param("enabled", s6_profile_enabled, false);
     if (s6_profile_enabled) {
-      const ros::NodeHandle profile_node(pnh_, "s6_motion_profile");
       const auto profile = velocity_ik::readS6MotionProfile(profile_node, robot_version_);
       profile.applyDynamics(velocity_limit_, acceleration_limit_, braking_limit_,
                             outward_acceleration_limit_, joint_jerk_limits_,
@@ -4506,6 +4545,14 @@ class PinocchioVelocityIk {
                   baseDofForDecisionIndex(i))
             : position_upper_(i);
       }
+#ifndef VELOCITY_IK_OFFLINE_TEST
+      if (dagger_ && arm_index >= 0 && !held_arm && i == armDecisionIndex(arm_index,6)) {
+        // Preserve the original candidate J7 range. If the policy starts outside
+        // that range, the measured first frame can only move back toward it.
+        safe_lower(i) = std::max(safe_lower(i), std::min(-.60,request.reference_q(i)));
+        safe_upper(i) = std::min(safe_upper(i), std::max(.60,request.reference_q(i)));
+      }
+#endif
       if ((lower_body || held_arm) && recruitment < 0.5) {
         // A certified QP can leave a boundary joint a few floating-point ulps
         // outside its endpoint. Do not turn that roundoff into an impossible
@@ -4859,6 +4906,22 @@ class PinocchioVelocityIk {
     const bool valid = weighted_qp_.solve(task_hessian, task_gradient, lower, upper,
                               constraint_matrix, constraint_lower, constraint_upper,
                               solution, return_code, &stats);
+    if (!valid && request.dagger_brake_on_failure) {
+      int worst = -1;
+      double violation = 0.;
+      if (solution->size() == lower.size() && solution->allFinite()) {
+        for (int i=0; i<lower.size(); ++i) {
+          const double excess = std::max(lower[i]-(*solution)[i], (*solution)[i]-upper[i]);
+          if (excess > violation) { worst=i; violation=excess; }
+        }
+      }
+      // The DAgger QP removes the three base variables before the solve.
+      const std::string joint = worst>=0 && worst<decisionDofCount()-3 ?
+          dof_layout_.decisionSpec(worst+3).name : "none (coupled constraint or solver residual)";
+      ROS_WARN_THROTTLE(1., "DAgger ProxQP code=%d native=%d acceptance=%d iter=%d primal=%g dual=%g box_joint=%s violation=%g",
+                        *return_code, stats.native_status, stats.acceptance_status, stats.iterations,
+                        stats.primal, stats.dual, joint.c_str(), violation);
+    }
     last_qp_finish_ns_=stats.end_ns;
 #ifdef VELOCITY_IK_OFFLINE_TEST
     if (!valid && offline_first_qp_failure_.is_null()) {
@@ -5341,6 +5404,26 @@ class PinocchioVelocityIk {
             candidate.joint_jerk_retry=true;candidate.joint_jerk_first_code=candidate.return_code;
             candidate.solver_valid=solveGeneralQp(
                 request,ha,ga,lo,hi,aa,constraint_lower,constraint_upper,&va,&candidate.return_code);
+          }
+          // A numerical QP rejection may still have a certified braking point.
+          // Retain it only inside the same physical, jerk and coupled torso bounds.
+          if (!candidate.solver_valid && request.dagger_brake_on_failure) {
+            DecisionVector brake = DecisionVector::Zero(n).cwiseMax(effective_lower).cwiseMin(effective_upper);
+            const DecisionVector rates = torso.matrix * brake;
+            const DecisionVector accel = (brake - request.reference_dq) / request.cycle_dt;
+            const DecisionVector jerk = (accel - request.reference_ddq) / request.cycle_dt;
+            bool ok = brake.allFinite() && (rates.array() >= torso.lower.array()).all() &&
+                (rates.array() <= torso.upper.array()).all() &&
+                (accel.cwiseAbs().array() <= acceleration_limit_.array() + 1.e-8).all();
+            for (int arm = 0; arm < kArmCount; ++arm)
+              for (int j = 0; j < kJointsPerArm; ++j) {
+                const int i = armDecisionIndex(arm, j);
+                ok &= !joint_jerk_enabled_ || std::abs(jerk[i]) <= joint_jerk_limits_[i] + 1.e-6;
+              }
+            if (ok) {
+              candidate.task_dq = brake;
+              candidate.dagger_brake_feasible = true;
+            }
           }
           if(candidate.joint_jerk_active && candidate.solver_valid) {
             for(int arm=0;arm<kArmCount;++arm)for(int joint=0;joint<kJointsPerArm;++joint) {
@@ -6008,6 +6091,159 @@ class PinocchioVelocityIk {
     }
     controller_startup_arm_pose_ = pose;
   }
+
+#ifndef VELOCITY_IK_OFFLINE_TEST
+  double dagger_seed_tolerance_, dagger_position_fast_hz_, dagger_orientation_fast_hz_;
+  bool dagger_adaptive_;
+  int dagger_grace_ticks_;
+  std::unique_ptr<velocity_ik::DaggerCandidate> dagger_;
+  std::array<velocity_ik::ContinuousVector, kArmCount> dagger_hand_position_;
+  std::array<velocity_ik::ContinuousRotation, kArmCount> dagger_hand_orientation_;
+
+  void publishDaggerCandidate() {
+    using Candidate = velocity_ik::DaggerCandidate;
+    const ros::Time now = ros::Time::now();
+    if (!robot_state_valid_ || !Candidate::fresh(now, sensor_source_stamp_, .2) ||
+        (ros::WallTime::now()-robot_state_receive_time_).toSec() > .2) {
+      dagger_->invalidateFeedback();
+      return;
+    }
+    dagger_->updateRequests(now);
+    SolverRequest request;
+    request.tracking = request.measured_state_valid = request.catchup_correction = true;
+    request.cycle_dt = 1. / solver_rate_hz_;
+    request.target.valid = request.target.arm_target_torso_relative = true;
+    request.measured_q = measured_q_;
+    request.measured_dq = measured_dq_;
+    // The policy can move either unrequested arm and the lower body between frames.
+    // Seed new grips from this sample, leaving the other engaged arm's integration intact.
+    setPlantDecisionPositions(measured_q_);
+    const auto& torso = plant_->GetFrameByName(torso_frame_name_);
+    auto ref = measured_q_.eval();
+    bool seed_valid = true;
+    for (int joint = 0; joint < kLowerBodyDof; ++joint) {
+      const int i = lowerBodyDecisionIndex(joint);
+      if (request.lower_joint_recruitment[joint] != 0.) continue;
+      double bounded;
+      const bool projected = velocity_ik::projectFixedDaggerJoint(ref[i], position_lower_[i],
+          position_upper_[i], dagger_seed_tolerance_, bounded);
+      const double error = std::abs(ref[i] - bounded);
+      if (error > 5.e-4)
+        ROS_WARN_THROTTLE(1., "DAgger locked %s measured %.8f bound %.8f tolerance %.5f",
+                          dof_layout_.decisionSpec(i).name.c_str(), ref[i], bounded, dagger_seed_tolerance_);
+      if (projected) ref[i] = bounded;
+      else seed_valid = false;
+    }
+    for (int arm = 0; arm < kArmCount; ++arm) {
+      auto& h = dagger_->hands[arm];
+      const auto& tcp = plant_->GetFrameByName(hand_frame_names_[arm]);
+      const auto measured = tcp.CalcPose(*plant_context_,torso);
+      const auto& elbow = plant_->GetFrameByName(elbow_frame_names_[arm]);
+      const auto& wrist = plant_->GetFrameByName(arm == 0 ? "zarm_l6_link" : "zarm_r6_link");
+      const auto offset = wrist.CalcPose(*plant_context_,tcp).translation();
+      for (int j = 0; j < kJointsPerArm; ++j) {
+        const int i = armDecisionIndex(arm,j);
+        if (h.ready) ref[i] = reference_q_[i];
+        else reference_dq_[i] = reference_ddq_[i] = 0.;
+      }
+      auto& position = dagger_hand_position_[arm];
+      auto& orientation = dagger_hand_orientation_[arm];
+      if (!h.ready) {
+        h.human_anchor = h.human;
+        h.robot_anchor.linear() = measured.rotation().matrix();
+        h.robot_anchor.translation() = measured.translation();
+        h.elbow_anchor = h.elbow;
+        h.robot_elbow = elbow.CalcPose(*plant_context_,torso).translation();
+        position.reset(h.robot_anchor.translation());
+        orientation.reset(Eigen::Quaterniond(h.robot_anchor.linear()));
+      } else {
+        const auto goal = dagger_->target(arm, offset);
+        // A residual deadband keeps the exact stationary filter. Fast motion
+        // increases bandwidth continuously without differentiating Quest samples.
+        const auto bandwidth = [&](double error, double onset, double full, double slow, double fast) {
+          return dagger_adaptive_ ? velocity_ik::daggerBandwidth(error, onset, full, slow, fast) : slow;
+        };
+        const double position_hz = bandwidth((goal.translation()-position.p).norm(), .004, .025,
+                                             hand_position_cutoff_hz_, dagger_position_fast_hz_);
+        velocity_ik::stepFixedVector(position, goal.translation(), request.cycle_dt, position_hz);
+        const Eigen::Quaterniond goal_q(goal.linear());
+        const double orientation_hz = bandwidth(orientation.q.angularDistance(goal_q), .015, .09,
+                                                hand_orientation_cutoff_hz_, dagger_orientation_fast_hz_);
+        velocity_ik::stepFixedRotation(orientation, goal_q, request.cycle_dt, orientation_hz);
+      }
+      auto& a = request.target.arm[arm];
+      a.hand_position = position.p;
+      a.hand_linear_ff = position.v;
+      a.hand_orientation = orientation.q;
+      a.hand_angular_ff = orientation.v;
+      a.elbow_valid = h.requested;
+      a.elbow_position = h.robot_elbow + dagger_->translation_scale.cwiseProduct(h.elbow-h.elbow_anchor);
+    }
+    reference_q_ = ref;
+    request.reference_q = ref;
+    request.reference_dq = reference_dq_;
+    request.reference_ddq = reference_ddq_;
+    if (dagger_->hands[0].requested || dagger_->hands[1].requested) {
+      request.dagger_brake_on_failure = seed_valid && dagger_grace_ticks_ > 0;
+      const auto solution = seed_valid ? solveRequest(request) : SolverCandidate{};
+      if (!solution.solver_valid) {
+        ROS_WARN_THROTTLE(1., "DAgger QP rejected code=%d locked_seed_ok=%d certified_brake=%d",
+                          seed_valid ? solution.return_code : -1001, seed_valid, solution.dagger_brake_feasible);
+      }
+      for (int arm = 0; arm < kArmCount; ++arm) {
+        auto& h = dagger_->hands[arm];
+        if (!h.requested) continue;
+        const bool grace = velocity_ik::allowDaggerBrake(h.ready, solution.solver_valid,
+            solution.dagger_brake_feasible, dagger_grace_ticks_, h.failed_ticks);
+        if (!solution.solver_valid && !grace) {
+          if (h.ready) ++h.generation;
+          h.ready = false;
+        }
+        for (int j = 0; j < kJointsPerArm; ++j) {
+          const int i = armDecisionIndex(arm,j);
+          if (!h.ready) {
+            reference_q_[i] = measured_q_[i];
+            reference_dq_[i] = reference_ddq_[i] = 0.;
+          } else {
+            const double v = solution.task_dq[i];
+            reference_q_[i] += .5 * request.cycle_dt * (reference_dq_[i]+v);
+            reference_ddq_[i] = (v-reference_dq_[i])/request.cycle_dt;
+            reference_dq_[i] = v;
+          }
+        }
+        h.ready = solution.solver_valid || grace;
+      }
+    }
+    Eigen::Vector4d measured, lo, hi;
+    for (int j=0; j<4; ++j) {
+      const int i = lowerBodyDecisionIndex(j);
+      measured[j]=measured_q_[i]; lo[j]=position_lower_[i]; hi[j]=position_upper_[i];
+    }
+    dagger_->updateWaist(now,sensor_source_stamp_,measured,lo,hi,
+        [&](const Eigen::Vector4d& lower, Eigen::Matrix4d* jac) {
+          auto q = measured_q_.eval();
+          for (int j=0; j<4; ++j) q[lowerBodyDecisionIndex(j)] = lower[j];
+          const auto feature = torsoFeatureInContext(q,plant_context_.get(),&q_full_);
+          if (jac) {
+            const auto xyz = frameTranslationJacobianRelative(torso_frame_name_,base_frame_name_);
+            jac->setZero();
+            for (int j=0; j<4; ++j) {
+              (*jac)(0,j) = xyz(0,lowerBodyDecisionIndex(j));
+              (*jac)(1,j) = xyz(2,lowerBodyDecisionIndex(j));
+              (*jac)(j==3 ? 3 : 2,j) = 1.;
+            }
+          }
+          return feature;
+        });
+    Candidate::ArmVector q, dq, ddq;
+    for (int arm=0; arm<2; ++arm) for (int j=0; j<7; ++j) {
+      q[arm*7+j] = reference_q_[armDecisionIndex(arm,j)];
+      dq[arm*7+j] = reference_dq_[armDecisionIndex(arm,j)];
+      ddq[arm*7+j] = reference_ddq_[armDecisionIndex(arm,j)];
+    }
+    dagger_->publish(ros::Time::now(),q,dq,ddq);
+  }
+#endif
 
   void publishOnce() {
     if (use_controller_startup_arm_pose_ && !controller_startup_arm_pose_applied_) {

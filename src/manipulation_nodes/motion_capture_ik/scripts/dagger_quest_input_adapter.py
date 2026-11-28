@@ -40,6 +40,8 @@ class DaggerQuestInputAdapter:
         self.stop_pub = rospy.Publisher('/stop_robot', Bool, queue_size=1)
         self.stop_enabled = rospy.get_param('/enable_vr_stop_robot', True)
         self._stop_down = False
+        self._last_skeleton_ms = None
+        self._last_skeleton_time = None
         self.joy_sub = rospy.Subscriber('/quest_joystick_data', JoySticks, self.dagger_joystick_callback,
                                         queue_size=1, tcp_nodelay=True)
         self.pose_sub = rospy.Subscriber('/leju_quest_bone_poses', PoseInfoList, self.dagger_pose_callback,
@@ -66,6 +68,11 @@ class DaggerQuestInputAdapter:
 
     def dagger_pose_callback(self, msg):
         import rospy
+        now = rospy.Time.now()
+        if (msg.timestamp_ms <= 0 or msg.timestamp_ms == self._last_skeleton_ms or
+                (self._last_skeleton_ms is not None and msg.timestamp_ms < self._last_skeleton_ms and
+                 0 <= (now - self._last_skeleton_time).to_sec() <= 0.2)):
+            return
         if len(msg.poses) <= 23:
             return
         chest = msg.poses[23]
@@ -76,8 +83,10 @@ class DaggerQuestInputAdapter:
         norm = math.sqrt(sum(x*x for x in values))
         if norm < 1e-8:
             return
+        self._last_skeleton_ms = msg.timestamp_ms
+        self._last_skeleton_time = now
         pose = self._PoseStamped()
-        pose.header.stamp = rospy.Time.now()
+        pose.header.stamp = now
         pose.header.frame_id = 'quest_world'
         pose.pose.position = chest.position
         pose.pose.orientation.x = q.x / norm

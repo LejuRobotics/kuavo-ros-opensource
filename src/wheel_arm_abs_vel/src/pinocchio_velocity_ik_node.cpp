@@ -176,13 +176,28 @@ double maxAbs(const Eigen::MatrixBase<Derived>& value) {
   return value.size() == 0 ? 0.0 : value.cwiseAbs().maxCoeff();
 }
 
-// Shared by the production constructor and the isolated recording test.
-void initializeAbsoluteRecording(ros::NodeHandle& nh, ros::Publisher& lower,
-                                 ros::Publisher& eef, ros::Publisher& input) {
-  lower = nh.advertise<sensor_msgs::JointState>("/whole_body_velocity_ik/record/lb_leg_traj", 2);
-  eef = nh.advertise<kuavo_msgs::twoArmHandPose>("/whole_body_velocity_ik/record/drake_ik/eef_pose", 2);
-  input = nh.advertise<kuavo_msgs::Float32MultiArrayStamped>("/whole_body_velocity_ik/record/drake_ik/input_pos", 2);
-}
+// Both recording names carry the same sample. Only serialize for connected recorders.
+template <typename Message>
+class RecordingPublisher {
+ public:
+  void advertise(ros::NodeHandle& nh, const std::string& topic) {
+    public_topic_ = nh.advertise<Message>(topic, 2);
+    record_topic_ = nh.advertise<Message>("/whole_body_velocity_ik/record" + topic, 2);
+  }
+
+  bool subscribed() const {
+    return public_topic_.getNumSubscribers() || record_topic_.getNumSubscribers();
+  }
+
+  void publish(const Message& message) const {
+    if (public_topic_.getNumSubscribers()) public_topic_.publish(message);
+    if (record_topic_.getNumSubscribers()) record_topic_.publish(message);
+  }
+
+ private:
+  ros::Publisher public_topic_;
+  ros::Publisher record_topic_;
+};
 
 }  // namespace
 
@@ -337,14 +352,7 @@ class PinocchioVelocityIk {
       formal_reference_pub_ =
           nh_.advertise<wheel_arm_abs_vel::WholeBodyIkReference>(
               reference_transport_.shm()?formal_reference_topic_+"/shm_mirror":formal_reference_topic_, 2);
-      if (pnh_.param("publish_legacy_arm_traj", true)) {
-        legacy_arm_record_pub_ = nh_.advertise<sensor_msgs::JointState>("/whole_body_velocity_ik/record/kuavo_arm_traj", 2);
-      }
-      if (pnh_.param("publish_absolute_bag_topics",
-                     pnh_.param("publish_incremental_bag_topics", true))) {
-        initializeAbsoluteRecording(nh_, legacy_lower_record_pub_,
-                                    legacy_eef_record_pub_, legacy_input_record_pub_);
-      }
+      initializeRecording();
     }
     if (enable_takeover_ && reference_transport_.shm()) {
       const auto publisher = formal_reference_pub_;
@@ -8289,8 +8297,8 @@ class PinocchioVelocityIk {
       wheel_arm_abs_vel::WholeBodyIkReference ros_message;
       if (kuavo_reference_shm::decode(message, ros_message)) formal_reference_pub_.publish(ros_message);
     }
-    const bool record_arm = legacy_arm_record_pub_.getNumSubscribers() > 0;
-    const bool record_lower = legacy_lower_record_pub_.getNumSubscribers() > 0;
+    const bool record_arm = legacy_arm_record_pub_.subscribed();
+    const bool record_lower = legacy_lower_record_pub_.subscribed();
     if ((record_arm || record_lower) && message.reference_seq % formal_reference_mirror_stride_ == 0) {
       diagnostics_.submit([this, message, record_arm, record_lower] {
         wheel_arm_abs_vel::WholeBodyIkReference ros_record;
@@ -8307,15 +8315,25 @@ class PinocchioVelocityIk {
   }
 
 
+  void initializeRecording() {
+    if (pnh_.param("publish_legacy_arm_traj", true))
+      legacy_arm_record_pub_.advertise(nh_, "/kuavo_arm_traj");
+    if (pnh_.param("publish_absolute_bag_topics", pnh_.param("publish_incremental_bag_topics", true))) {
+      legacy_lower_record_pub_.advertise(nh_, "/lb_leg_traj");
+      legacy_eef_record_pub_.advertise(nh_, "/drake_ik/eef_pose");
+      legacy_input_record_pub_.advertise(nh_, "/drake_ik/input_pos");
+    }
+  }
+
   bool absoluteRecordHasSubscribers() const {
-    return legacy_eef_record_pub_.getNumSubscribers() || legacy_input_record_pub_.getNumSubscribers();
+    return legacy_eef_record_pub_.subscribed() || legacy_input_record_pub_.subscribed();
   }
 
   // Diagnostic worker only: reuse its measured-state FK cache. The legacy absolute
   // TCP is end_frames_name_ik[1/2] + eef_z_offset, without velocity-only TCP overrides.
   void publishAbsoluteRecordInput(const std_msgs::Header& source_header,
       const TargetSnapshot& world_target) {
-    if (!world_target.valid || !legacy_input_record_pub_.getNumSubscribers()) return;
+    if (!world_target.valid || !legacy_input_record_pub_.subscribed()) return;
     const auto world_from_base = plant_->GetFrameByName(base_frame_name_).CalcPoseInWorld(*diagnostic_context_);
     const auto base_from_world = world_from_base.rotation().matrix().transpose().eval();
     kuavo_msgs::Float32MultiArrayStamped input;
@@ -8337,7 +8355,7 @@ class PinocchioVelocityIk {
 
   // Called after existing reference diagnostics set the reference-state context.
   void publishAbsoluteRecordEef(const std_msgs::Header& header, const DecisionVector& reference_q) {
-    if (!legacy_eef_record_pub_.getNumSubscribers()) return;
+    if (!legacy_eef_record_pub_.subscribed()) return;
     kuavo_msgs::twoArmHandPose eef;
     eef.header = header;
     eef.header.frame_id = base_frame_name_;
@@ -8870,8 +8888,10 @@ class PinocchioVelocityIk {
   ros::Publisher reference_pub_;
   ros::Publisher mapper_status_pub_;
   ros::Publisher formal_reference_pub_;
-  ros::Publisher legacy_arm_record_pub_;
-  ros::Publisher legacy_lower_record_pub_, legacy_eef_record_pub_, legacy_input_record_pub_;
+  RecordingPublisher<sensor_msgs::JointState> legacy_arm_record_pub_;
+  RecordingPublisher<sensor_msgs::JointState> legacy_lower_record_pub_;
+  RecordingPublisher<kuavo_msgs::twoArmHandPose> legacy_eef_record_pub_;
+  RecordingPublisher<kuavo_msgs::Float32MultiArrayStamped> legacy_input_record_pub_;
   std::array<std::string, kArmCount> absolute_record_frame_names_;
   std::array<Eigen::Isometry3d, kArmCount> absolute_record_tcp_offsets_;
 

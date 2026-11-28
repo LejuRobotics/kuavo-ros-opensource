@@ -1,5 +1,6 @@
 // Pinocchio must be included before Boost headers
 #include <pinocchio/fwd.hpp>
+#include <kuavo_msgs/whole_body_ik_record.h>
 
 #include "humanoid_controllers/rl/armController.h"
 #include "humanoid_controllers/armTorqueController.h"
@@ -1499,6 +1500,7 @@ void ArmController::applyRateLimitedInterpolation(double dt,
 
 void ArmController::jointStateCallback(const sensor_msgs::JointState::ConstPtr& msg)
 {
+  if (msg && msg->header.frame_id == kuavo_msgs::kWholeBodyIkRecordFrame) return;
   if (external_control_pause_requested_.load(std::memory_order_acquire))
   {
     return;

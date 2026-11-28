@@ -2,6 +2,13 @@
 <launch>
   <arg name="lock_knee_leg" default="false" />
   <arg name="teleop_mode" default="absolute" doc="absolute or incremental (wrist anchor)" />
+  <arg name="dagger_candidate_only" default="false"/>
+  <arg name="dagger_fixed_lower_seed_tolerance_rad" default="0.005"/>
+  <arg name="dagger_qp_grace_ticks" default="2"/>
+  <arg name="dagger_hand_position_cutoff_hz" default="10.0"/>
+  <arg name="dagger_hand_orientation_cutoff_hz" default="8.0"/>
+  <arg name="dagger_use_adaptive_bandwidth" default="true"/>
+  <param name="/quest3/dagger_candidate_only" value="$(arg dagger_candidate_only)" type="bool"/>
   <arg name="external_quest_monitors" default="false"/>
   <arg name="torso_control_side" default="single" />
   <arg name="lb_grip_resume_duration" default="1.0" />
@@ -28,9 +35,9 @@
   <arg name="reference_transport" default="shm" />
   <arg name="reference_shm_key" default="344421" />
   <arg name="owner_shm_key" default="344422" />
-  <param name="/whole_body_velocity_ik/reference/transport" value="$(arg reference_transport)" />
-  <param name="/whole_body_velocity_ik/reference/shm_reference_key" value="$(arg reference_shm_key)" />
-  <param name="/whole_body_velocity_ik/reference/shm_owner_key" value="$(arg owner_shm_key)" />
+  <param unless="$(arg dagger_candidate_only)" name="/whole_body_velocity_ik/reference/transport" value="$(arg reference_transport)" />
+  <param unless="$(arg dagger_candidate_only)" name="/whole_body_velocity_ik/reference/shm_reference_key" value="$(arg reference_shm_key)" />
+  <param unless="$(arg dagger_candidate_only)" name="/whole_body_velocity_ik/reference/shm_owner_key" value="$(arg owner_shm_key)" />
   <arg name="robot_version" default="$(optenv ROBOT_VERSION UNCONFIGURED_ROBOT_VERSION)" />
   <arg name="preparation_arm_velocity_limit" default="1.5" />
   <arg name="preparation_gain" default="4.0" />
@@ -117,7 +124,8 @@
   <arg name="ik_type_idx" default="0" />
   <arg name="ip_address" default="" />
   <arg name="publish_legacy_arm_traj" default="true" />
-  <arg name="publish_absolute_bag_topics" default="true" />
+  <arg name="publish_incremental_bag_topics" default="true" />
+  <arg name="publish_absolute_bag_topics" default="$(arg publish_incremental_bag_topics)" />
   <arg name="control_torso" default="true" doc="Initial torso following; false holds torso until manually enabled. PREPARE remains available." />
   <arg name="dexhand_front_trigger" default="true" doc="Both front triggers independently command six dexhand channels, 0=open and 100=closed." />
   <arg name="control_finger_type" default="0" />
@@ -127,13 +135,13 @@
   <arg name="unlock_transition_enabled" default="$(eval int(arg('ctrl_arm_idx')) == 2)" doc="Enable the shared collision-checked transition for dual-arm control, independent of robot version and end-effector selection" />
   <arg name="unlock_tool_radius" default="" doc="Optional flange-to-TCP capsule radius in metres; empty retains the YAML default. Set to enclose the installed end effector." />
   <arg name="sg100_enabled" default="true" doc="Allow the shared end-effector resolver to start SG100 only for heiman; false explicitly disables it" />
-  <node pkg="wheel_arm_abs_vel" type="absolute_end_effector.py" name="sg100_mapper_bridge" args="--bridge --machine-mode=auto --config &quot;$(find kuavo_assets)/config/kuavo_v$(arg robot_version)/kuavo.json&quot; --ee-type=$(arg ee_type)" if="$(arg sg100_enabled)" output="screen" launch-prefix="$(eval find('wheel_arm_abs_vel') + '/scripts/whole_body_ik_runtime.sh background')" />
+  <node pkg="wheel_arm_abs_vel" type="absolute_end_effector.py" name="sg100_mapper_bridge" args="--bridge --machine-mode=auto --config &quot;$(find kuavo_assets)/config/kuavo_v$(arg robot_version)/kuavo.json&quot; --ee-type=$(arg ee_type)" if="$(eval arg('sg100_enabled') and not arg('dagger_candidate_only'))" output="screen" launch-prefix="$(eval find('wheel_arm_abs_vel') + '/scripts/whole_body_ik_runtime.sh background')" />
   <!-- 头部指令由机器端 head_control_node 发布。 -->
-  <arg name="enable_head_control" default="true" />
+  <arg name="enable_head_control" default="$(eval not arg('dagger_candidate_only'))" />
   <arg name="enable_terminal_start" default="false" />
   <!-- Input-terminal alternative to long A; controller-terminal keyboard remains unchanged. -->
   <node pkg="wheel_arm_abs_vel" type="terminal_initial_start.py" name="absolute_terminal_start"
-        output="screen" if="$(arg enable_terminal_start)"
+        output="screen" if="$(eval arg('enable_terminal_start') and not arg('dagger_candidate_only'))"
         launch-prefix="$(eval find('wheel_arm_abs_vel') + '/scripts/whole_body_ik_runtime.sh background')" />
   <arg name="hand_reference_mode" default="thumb_index" />
   <arg name="use_arm_collision" default="false" />
@@ -217,7 +225,7 @@
   <arg name="min_reachable_distance" default="0.08" />
   <arg name="elbow_min_distance" default="0.16" />
   <arg name="elbow_max_distance" default="0.24" />
-  <arg name="use_incremental_hand_orientation" default="false" />
+  <arg name="use_incremental_hand_orientation" default="$(arg dagger_candidate_only)" />
   <arg name="limit_shoulder_pitch_upper" default="false" />
   <arg name="shoulder_pitch_upper_limit" default="0.3" />
   <param name="/quest3/limit_shoulder_pitch_upper" value="$(arg limit_shoulder_pitch_upper)" type="bool" />
@@ -236,10 +244,20 @@
   <param name="/quest3/use_step_turning" value="$(arg use_step_turning)" />
   <param name="control_torso" value="$(arg control_torso)" type="bool" />
   <param name="/wheel_ik" value="$(arg wheel_ik)" type="bool" />
-  <param name="/vr_ik/enable_velocity_ik_takeover" value="$(arg enable_velocity_ik_takeover)" type="bool" />
+  <param unless="$(arg dagger_candidate_only)" name="/vr_ik/enable_velocity_ik_takeover" value="$(arg enable_velocity_ik_takeover)" type="bool" />
   <param name="/reset_joint_to_default" value="$(arg reset_joint_to_default)" type="bool" />
   <param name="/use_pico" value="$(arg use_pico)" type="bool" />
   <node pkg="wheel_arm_abs_vel" type="$(eval 'pinocchio_incremental_velocity_ik_node' if arg('teleop_mode') == 'incremental' else 'pinocchio_velocity_ik_node')" name="absolute_velocity_ik" output="screen" if="$(eval arg('enable_velocity_ik_takeover') and arg('wheel_ik') and not arg('use_cpp_incremental_ik'))" respawn="false" launch-prefix="$(eval find('wheel_arm_abs_vel') + '/scripts/whole_body_ik_runtime.sh ik')" required="true">
+    <param name="dagger_candidate_only" value="$(arg dagger_candidate_only)" type="bool"/>
+    <param if="$(arg dagger_candidate_only)" name="dagger_fixed_lower_seed_tolerance_rad" value="$(arg dagger_fixed_lower_seed_tolerance_rad)" type="double"/>
+    <param if="$(arg dagger_candidate_only)" name="dagger_qp_grace_ticks" value="$(arg dagger_qp_grace_ticks)" type="int"/>
+    <param if="$(arg dagger_candidate_only)" name="dagger_hand_position_cutoff_hz" value="$(arg dagger_hand_position_cutoff_hz)" type="double"/>
+    <param if="$(arg dagger_candidate_only)" name="dagger_hand_orientation_cutoff_hz" value="$(arg dagger_hand_orientation_cutoff_hz)" type="double"/>
+    <param if="$(arg dagger_candidate_only)" name="dagger_use_adaptive_bandwidth" value="$(arg dagger_use_adaptive_bandwidth)" type="bool"/>
+    <param name="use_incremental_hand_orientation" value="$(arg use_incremental_hand_orientation)" if="$(arg dagger_candidate_only)"/>
+    <param name="delta_scale_x" value="$(arg delta_scale_x)" type="double" if="$(arg dagger_candidate_only)"/>
+    <param name="delta_scale_y" value="$(arg delta_scale_y)" type="double" if="$(arg dagger_candidate_only)"/>
+    <param name="delta_scale_z" value="$(arg delta_scale_z)" type="double" if="$(arg dagger_candidate_only)"/>
     <param name="incremental_geometry" value="true" if="$(eval arg('teleop_mode') == 'incremental')" />
     <param name="publish_legacy_arm_traj" value="$(arg publish_legacy_arm_traj)" />
     <param name="publish_absolute_bag_topics" value="$(arg publish_absolute_bag_topics)" />
@@ -248,7 +266,7 @@
     <param name="ctrl_arm_idx" value="$(arg ctrl_arm_idx)" type="int" />
     <param name="solver_rate_hz" value="500.0" type="double" />
     <param name="target_topic" value="/mm/teleop_tcp_target" type="string" />
-    <param name="enable_takeover" value="$(arg enable_velocity_ik_takeover)" type="bool" />
+    <param name="enable_takeover" value="$(eval arg('enable_velocity_ik_takeover') and not arg('dagger_candidate_only'))" type="bool" />
     <param name="output_prefix" value="/whole_body_velocity_ik/diagnostics" type="string" />
     <param name="formal_reference_topic" value="/whole_body_velocity_ik/reference" type="string" />
     <param name="command_topic" value="/kuavo_arm_traj" type="string" />
@@ -355,7 +373,7 @@
     <param name="temporal_cost/enabled" value="$(arg temporal_cost_enabled)" type="bool" />
     <param name="operating_diagnostics/enabled" value="$(arg operating_diagnostics_enabled)" type="bool" />
   </node>
-  <node pkg="wheel_arm_abs_vel" type="$(eval 'run_incremental_velocity.py' if arg('teleop_mode') == 'incremental' else 'ik_ros_velocity.py')" name="ik_ros_uni" args=" --version $(arg version) --ctrl_arm_idx $(arg ctrl_arm_idx) --ik_type_idx $(arg ik_type_idx) --control_torso=$(arg control_torso) --control_finger_type=$(arg control_finger_type) --predict_gesture=$(arg predict_gesture) --ee_type=$(arg ee_type) --hand_reference_mode=$(arg hand_reference_mode) --use_two_stage_ik=$(arg use_two_stage_ik)" output="screen" unless="$(arg use_cpp_incremental_ik)" respawn="false" launch-prefix="$(eval find('wheel_arm_abs_vel') + '/scripts/whole_body_ik_runtime.sh mapper')" required="true">
+  <node pkg="wheel_arm_abs_vel" type="$(eval 'run_incremental_velocity.py' if arg('teleop_mode') == 'incremental' else 'ik_ros_velocity.py')" name="ik_ros_uni" args=" --version $(arg version) --ctrl_arm_idx $(arg ctrl_arm_idx) --ik_type_idx $(arg ik_type_idx) --control_torso=$(arg control_torso) --control_finger_type=$(arg control_finger_type) --predict_gesture=$(arg predict_gesture) --ee_type=$(arg ee_type) --hand_reference_mode=$(arg hand_reference_mode) --use_two_stage_ik=$(arg use_two_stage_ik)" output="screen" unless="$(eval arg('use_cpp_incremental_ik') or arg('dagger_candidate_only'))" respawn="false" launch-prefix="$(eval find('wheel_arm_abs_vel') + '/scripts/whole_body_ik_runtime.sh mapper')" required="true">
     <param name="arm_move_threshold" value="$(arg arm_move_threshold)" if="$(eval arg('teleop_mode') == 'incremental')" />
     <param name="init_control_waist_enable" value="$(arg init_control_waist_enable)" if="$(eval arg('teleop_mode') == 'incremental')" />
     <param name="/ik_ros_uni_cpp_node/quest3/lock_knee_leg" value="$(arg lock_knee_leg)" if="$(eval arg('teleop_mode') == 'incremental')" />
@@ -440,7 +458,7 @@
     <param name="velocity_tcp_geometry_id" value="V$(arg robot_version)_CONFIGURED_FULL_FOREARM_0450_UNCALIBRATED_V1" type="str" />
     <env name="ROBOT_VERSION" value="$(arg robot_version)" />
   </node>
-  <node pkg="wheel_arm_abs_vel" type="humanoid_quest_absolute_control" name="humanoid_quest_control_with_arm" output="screen" if="$(eval wheel_ik or arg('use_arm_only_ik'))" launch-prefix="$(find wheel_arm_abs_vel)/scripts/whole_body_ik_runtime.sh background bash -o pipefail $(find humanoid_controllers)/scripts/start_node.sh" respawn="false" required="true">
+  <node pkg="wheel_arm_abs_vel" type="humanoid_quest_absolute_control" name="humanoid_quest_control_with_arm" output="screen" if="$(eval (wheel_ik or arg('use_arm_only_ik')) and not arg('dagger_candidate_only'))" launch-prefix="$(find wheel_arm_abs_vel)/scripts/whole_body_ik_runtime.sh background bash -o pipefail $(find humanoid_controllers)/scripts/start_node.sh" respawn="false" required="true">
     <param name="robot_version" value="$(arg robot_version)" type="int" />
     <param name="robot_type" value="1" type="int" />
     <param name="referenceFile" value="$(find humanoid_controllers)/config/kuavo_v$(arg robot_version)/command/reference.info" type="str" />
@@ -450,6 +468,7 @@
   <param name="wheel_ik" value="$(arg wheel_ik)" />
   <param name="use_pico" value="$(arg use_pico)" />
   <node pkg="wheel_arm_abs_vel" type="monitor_quest3_velocity.py" args="$(arg ip_address)" name="monitor_quest3" output="screen" if="$(eval arg('input_source') == 'quest' and not arg('external_quest_monitors') and not arg('use_cpp_monitor'))" launch-prefix="$(eval find('wheel_arm_abs_vel') + '/scripts/whole_body_ik_runtime.sh quest')">
+    <param name="dagger_candidate_only" value="$(arg dagger_candidate_only)" type="bool" />
     <param name="control_finger_tf_enabled" value="$(arg predict_gesture)" type="bool" />
     <param name="enable_head_control" value="$(arg enable_head_control)" />
   </node>
@@ -468,17 +487,19 @@
   <node pkg="motion_capture_ik" type="torso_joystick_node.py" name="torso_joystick_node" output="screen" if="$(arg single_hand_mode)" launch-prefix="$(eval find('wheel_arm_abs_vel') + '/scripts/whole_body_ik_runtime.sh background')" />
   <node pkg="noitom_hi5_hand_udp_python" type="webrtc_videostream.py" name="webrtc_videostream" output="screen" args="$(arg camera_publisher_name) $(arg ip_address)" if="$(arg enable_videostream)" launch-prefix="$(eval find('wheel_arm_abs_vel') + '/scripts/whole_body_ik_runtime.sh background')" />
   <!-- Acquisition lifetime follows this launch, never an earlier SSH session. -->
-  <node pkg="wheel_arm_abs_vel" type="run_scheduler_observer.py" name="kuavo_scheduler_flight_observer" output="screen" respawn="false" required="false" if="$(eval arg('enable_velocity_ik_takeover') and arg('wheel_ik') and not arg('use_cpp_incremental_ik'))" launch-prefix="$(eval find('wheel_arm_abs_vel') + '/scripts/whole_body_ik_runtime.sh background')" />
+  <node pkg="wheel_arm_abs_vel" type="run_scheduler_observer.py" name="kuavo_scheduler_flight_observer" output="screen" respawn="false" required="false" if="$(eval arg('enable_velocity_ik_takeover') and arg('wheel_ik') and not arg('use_cpp_incremental_ik') and not arg('dagger_candidate_only'))" launch-prefix="$(eval find('wheel_arm_abs_vel') + '/scripts/whole_body_ik_runtime.sh background')" />
   <!-- Read at node startup; load last so included YAML cannot override audit rates. -->
-  <include file="$(find wheel_arm_abs_vel)/launch/bypass_communication_profile.launch" if="$(eval arg('wheel_ik') and not arg('use_cpp_incremental_ik') and arg('enable_velocity_ik_takeover'))">
+  <include file="$(find wheel_arm_abs_vel)/launch/bypass_communication_profile.launch" if="$(eval arg('wheel_ik') and not arg('use_cpp_incremental_ik') and arg('enable_velocity_ik_takeover') and not arg('dagger_candidate_only'))">
     <arg name="full_rate_audit" value="$(arg communication_full_rate_audit)" />
     <arg name="second_round_enabled" value="$(arg communication_second_round_enabled)" />
   </include>
-  <include file="$(find wheel_arm_abs_vel)/launch/j3_overshoot_profile.launch">
+  <include file="$(find wheel_arm_abs_vel)/launch/j3_overshoot_profile.launch" unless="$(arg dagger_candidate_only)">
     <arg name="enabled" value="$(eval arg('j3_overshoot_profile') and int(arg('robot_version')) in (62, 63) and arg('wheel_ik') and not arg('use_cpp_incremental_ik') and arg('enable_velocity_ik_takeover'))" />
     <arg name="kd" value="$(arg j3_kd)" />
   </include>
   <arg name="absolute_launch_contract" value="$(eval {'supported': 'wheel_arm_abs_vel_s62'}['supported' if (int(arg('robot_version')) > 0 and arg('wheel_ik') and arg('enable_velocity_ik_takeover') and not arg('use_cpp_incremental_ik') and not arg('use_arm_only_ik') and not arg('legacy_pico_profile')) else 'Private absolute input requires a validated full wheel model wheel_ik=true takeover=true; incremental/arm-only/legacy profiles are unsupported'])" />
+  <arg name="dagger_mode_contract" value="$(eval {True: True}[not arg('dagger_candidate_only') or (arg('teleop_mode') == 'incremental' and arg('input_source') == 'quest' and not arg('external_quest_monitors') and not arg('use_cpp_monitor') and not arg('single_hand_mode') and not arg('use_arm_only_ik') and int(arg('ctrl_arm_idx')) == 2)])"/>
+  <node if="$(arg dagger_candidate_only)" pkg="motion_capture_ik" type="dagger_quest_input_adapter.py" name="dagger_quest_input_adapter" output="screen"/>
   <arg name="dual_input_contract" value="$(eval {True: True}[not arg('external_quest_monitors') or (arg('teleop_mode') == 'incremental' and arg('input_source') == 'quest' and arg('torso_control_side') in ['left', 'right'] and not arg('use_cpp_monitor'))])" />
   <arg name="incremental_mode_contract" value="$(eval {'ok': 'ok'}['ok' if arg('teleop_mode') == 'absolute' or (arg('teleop_mode') == 'incremental' and not arg('use_cpp_incremental_ik') and arg('wheel_ik') and arg('enable_velocity_ik_takeover')) else 'Incremental velocity requires wheel_ik=true, takeover=true and use_cpp_incremental_ik=false'])" />
 

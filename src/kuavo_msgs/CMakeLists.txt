@@ -348,7 +348,7 @@ generate_messages(
 ## CATKIN_DEPENDS: catkin_packages dependent projects also need
 ## DEPENDS: system dependencies of this project that dependent projects also need
 catkin_package(
-# #  INCLUDE_DIRS include
+  INCLUDE_DIRS include
 #  LIBRARIES kuavo_msgs
  CATKIN_DEPENDS message_generation message_runtime 
 # #  DEPENDS system_lib
@@ -424,11 +424,9 @@ include_directories(
 # )
 
 ## Mark cpp header files for installation
-# install(DIRECTORY include/${PROJECT_NAME}/
-#   DESTINATION ${CATKIN_PACKAGE_INCLUDE_DESTINATION}
-#   FILES_MATCHING PATTERN "*.h"
-#   PATTERN ".svn" EXCLUDE
-# )
+install(DIRECTORY include/${PROJECT_NAME}/
+  DESTINATION ${CATKIN_PACKAGE_INCLUDE_DESTINATION}
+)
 
 ## Mark other files for installation (e.g. launch and bag files, etc.)
 # install(FILES

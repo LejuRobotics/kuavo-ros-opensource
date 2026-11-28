@@ -100,7 +100,8 @@ find_package(Boost REQUIRED COMPONENTS
   # fkSrv.srv
 # )
 
-# generate_messages already handled by kuavo_msgs
+add_message_files(FILES DaggerArmSample.msg)
+generate_messages(DEPENDENCIES std_msgs)
 
 catkin_package(
   INCLUDE_DIRS include

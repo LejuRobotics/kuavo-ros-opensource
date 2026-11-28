@@ -1,4 +1,5 @@
 #include "humanoid_controllers/ArmTrajReceiver.h"
+#include <kuavo_msgs/whole_body_ik_record.h>
 
 #include <algorithm>
 #include <cmath>
@@ -169,7 +170,8 @@ void ArmTrajReceiver::ingest(ArmTrajSource source, const double* pos_rad, const 
 }
 
 void ArmTrajReceiver::rosCallback(const sensor_msgs::JointState::ConstPtr& msg) {
-  if (!msg || !shouldAcceptFrom(ArmTrajSource::kRosTopic)) {
+  if (!msg || msg->header.frame_id == kuavo_msgs::kWholeBodyIkRecordFrame ||
+      !shouldAcceptFrom(ArmTrajSource::kRosTopic)) {
     return;
   }
   if (static_cast<int>(msg->position.size()) < arm_num_) {

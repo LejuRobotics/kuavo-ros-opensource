@@ -1,4 +1,5 @@
 #include <ros/init.h>
+#include <kuavo_msgs/whole_body_ik_record.h>
 #include <ros/package.h>
 #include <cmath>
 #include "std_msgs/Float64.h"
@@ -350,6 +351,7 @@ class VRHandCommandNode {
   private:
     void vrCmdCallback(const sensor_msgs::JointState::ConstPtr &msg)
     {
+      if (msg && msg->header.frame_id == kuavo_msgs::kWholeBodyIkRecordFrame) return;
       // if(!enable_ctrl_){
       //   ROS_ERROR("Arm control is not enabled, can NOT response to vr command.");
       //   return;

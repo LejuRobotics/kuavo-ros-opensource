@@ -28,6 +28,20 @@ class IncrementalLaunchTest(unittest.TestCase):
    self.assertEqual(cfg.params['/ik_ros_uni/vr_kalman_position_sample_hold_seconds'].value,0.)
   pico=self.load('pico_velocity_ik.launch',['teleop_mode:=incremental'])
   self.assertEqual(pico.params['/ik_ros_uni/vr_kalman_chest_sample_hold_seconds'].value,0.)
+ def test_dagger_uses_candidate_io_and_leaves_reference_transport_to_bridge(self):
+  cfg=self.load('quest_velocity_ik.launch',['teleop_mode:=incremental','dagger_candidate_only:=true'])
+  kinds={n.type for n in cfg.nodes}
+  self.assertTrue({'dagger_quest_input_adapter.py','pinocchio_incremental_velocity_ik_node'} <= kinds)
+  self.assertTrue({'humanoid_quest_absolute_control','run_incremental_velocity.py',
+                   'terminal_initial_start.py','absolute_end_effector.py'}.isdisjoint(kinds))
+  self.assertTrue(cfg.params['/quest3/dagger_candidate_only'].value)
+  self.assertFalse(cfg.params['/absolute_velocity_ik/enable_takeover'].value)
+  self.assertNotIn('/whole_body_velocity_ik/reference/transport',cfg.params)
+  self.assertNotIn('/vr_ik/enable_velocity_ik_takeover',cfg.params)
+  for mode in ('teleop_mode:=absolute','input_source:=pico','single_hand_mode:=true'):
+   args=['teleop_mode:=incremental','dagger_candidate_only:=true']
+   if mode.startswith('teleop_mode'): args.pop(0)
+   with self.assertRaises(Exception): self.load('quest_velocity_ik.launch',args+[mode])
  def test_dual_owner_and_shared_parameter_forwarding(self):
   for side in ('left','right'):
    cfg=self.load('dual_quest_incremental_velocity_ik.launch',['left_ip:=192.0.2.1','right_ip:=192.0.2.2','torso_control_side:='+side,'reference_transport:=ros','reference_shm_key:=454321','owner_shm_key:=454322'])

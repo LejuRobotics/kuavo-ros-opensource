@@ -69,6 +69,7 @@ class Quest3BoneFramePublisher:
         self.listening_udp_ports_cnt = 0
 
         rospy.init_node('Quest3_bone_frame_publisher', anonymous=True)
+        self.dagger_candidate_only = rospy.get_param("~dagger_candidate_only", False)
         self.publish_quest3_globals = bool(rospy.get_param('~publish_quest3_globals', True))
         self.start_state_server = bool(rospy.get_param('~start_state_server', True))
         self.connected_param = str(rospy.get_param('~connected_param', '') or '')
@@ -260,7 +261,7 @@ class Quest3BoneFramePublisher:
         sys.exit(0)
 
     def reset_vr_torso_state_on_shutdown(self):
-        if not self.publish_quest3_globals or self.vr_torso_state_reset:
+        if self.dagger_candidate_only or not self.publish_quest3_globals or self.vr_torso_state_reset:
             return
 
         self.vr_torso_state_reset = True
@@ -742,7 +743,7 @@ class Quest3BoneFramePublisher:
                 event = event_pb2.LejuHandPoseEvent()
                 event.ParseFromString(data)
                 # Configuration requests never block the pose receiver.
-                if event.HasField('item_mass_force_request'):
+                if not self.dagger_candidate_only and event.HasField('item_mass_force_request'):
                     try:
                         self._control_requests.put_nowait(event.item_mass_force_request)
                     except queue.Full:
@@ -852,9 +853,9 @@ class Quest3BoneFramePublisher:
         self._control_requests = queue.Queue(maxsize=32)
         timing_pub = rospy.Publisher('/quest3/input_timing', Float64MultiArray, queue_size=1)
         receiver = threading.Thread(target=self._receive_packets, daemon=True)
-        auxiliary = threading.Thread(target=self._auxiliary_loop, daemon=True)
         receiver.start()
-        auxiliary.start()
+        if not self.dagger_candidate_only:
+            threading.Thread(target=self._auxiliary_loop, daemon=True).start()
         while not rospy.is_shutdown() and receiver.is_alive():
             sample = self._pose_mailbox.take()
             if sample is None:
@@ -875,7 +876,8 @@ class Quest3BoneFramePublisher:
                 if pose_info_list.poses:
                     self.pose_pub.publish(pose_info_list)
                     self.publish_pose_tf(pose_info_list, received_ros, received, relative_age)
-                    self._aux_mailbox.put((event, received_ros))
+                    if not self.dagger_candidate_only:
+                        self._aux_mailbox.put((event, received_ros))
                 # [device_ms, receive_ros, receive_monotonic, processing_start,
                 #  processing_end, relative_age, overwritten, rejected, duplicate]
                 timing_pub.publish(Float64MultiArray(data=[

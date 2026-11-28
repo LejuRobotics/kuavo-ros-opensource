@@ -1,4 +1,5 @@
 #include "humanoid_controllers/ControlDataManager.h"
+#include <kuavo_msgs/whole_body_ik_record.h>
 #include <kuavo_msgs/SetIncrementalArmTrajLink.h>
 #include <iostream>
 #include <cmath>
@@ -650,6 +651,7 @@ void ControlDataManager::ingestArmJointTrajectory(const double* pos_rad, const d
 }
 
 void ControlDataManager::legJointTrajCallback(const sensor_msgs::JointState::ConstPtr& msg) {
+    if (msg && msg->header.frame_id == kuavo_msgs::kWholeBodyIkRecordFrame) return;
     // disable 期间丢弃新的下肢轨迹指令
     if (!prev_enable_control_.load(std::memory_order_acquire)) return;
 

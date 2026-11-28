@@ -1,4 +1,5 @@
 #include <pinocchio/fwd.hpp> // forward declarations must be included first.
+#include <kuavo_msgs/whole_body_ik_record.h>
 #include <pinocchio/algorithm/frames.hpp>
 #include <pinocchio/algorithm/kinematics.hpp>
 
@@ -1105,6 +1106,7 @@ namespace mobile_manipulator {
     // 添加订阅/kuavo_arm_traj话题
     auto armJointTrajCallback = [this](const sensor_msgs::JointState::ConstPtr &msg)
     {
+      if (msg && msg->header.frame_id == kuavo_msgs::kWholeBodyIkRecordFrame) return;
       // disable 期间丢弃所有运动指令
       if (!isEnableControl()) return;
 
@@ -1138,6 +1140,7 @@ namespace mobile_manipulator {
     // 添加订阅/lb_leg_traj话题
     auto lbLegJointTrajCallback = [this](const sensor_msgs::JointState::ConstPtr &msg)
     {
+      if (msg && msg->header.frame_id == kuavo_msgs::kWholeBodyIkRecordFrame) return;
       // disable 期间丢弃所有运动指令
       if (!isEnableControl()) return;
 

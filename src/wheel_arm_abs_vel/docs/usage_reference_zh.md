@@ -24,6 +24,16 @@ Quest/Pico 数据 → 输入有效性与手柄状态 → 绝对坐标映射 → 
 
 正式参考含底盘 3 维、腰部 4 维、双臂 14 维；固定底盘时仍要区分整体参考与 18 维腰臂控制。默认共享内存键为 344421/344422，控制器和输入必须一致。先启动控制器，再启动一种输入。同一 IPC 命名空间不能同时运行多套使用相同键的链路。
 
+### 2.1 单 Quest 全身增量 IK 的 DAgger 候选模式
+
+在已编译并加载本工作区的 ROS 终端运行以下命令。主控与 Quest 须连接同一 ROS master，`robot_version` 与实际 5W 机型一致。主控提供带当前时间戳的 `/sensors_data_raw`。
+
+```bash
+roslaunch wheel_arm_abs_vel quest_velocity_ik.launch robot_version:=62 teleop_mode:=incremental dagger_candidate_only:=true
+```
+
+左右握把分别请求介入，扳机值发布到 `/dagger/vr/eef_action`。IK 将双臂 14 关节的候选位置和速度（rad、rad/s）发布到 `/dagger/vr/arm_candidate`，有订阅者时还发布 `/dagger/ik/arm_sample`（`motion_capture_ik/DaggerArmSample`）。两者可以按 `session` 和 `sequence` 配对。腰部配置从 `/dagger/vr/waist_config` 输入，回执可在 JSON 的 `waist.config_session` 检查。控制授权与执行由外部仲裁和主控负责。普通增量遥操省略 `dagger_candidate_only`。
+
 ## 3. 输入切换、HOLD 与恢复
 
 手臂模式为固定 0、复位 1、跟随 2。X+A 在 1 与 2 间切换，0 下允许切回复位；X+B 只在 2 与 0 间切换，1 下禁止。输入恢复、连续性恢复、操作确认和执行权取得是不同条件。`confirm_ready` 表示具备确认条件，不表示确认已经被接受。长时间丢失可以锁存 HOLD；不能仅靠新帧到来判断已经重新跟随。
